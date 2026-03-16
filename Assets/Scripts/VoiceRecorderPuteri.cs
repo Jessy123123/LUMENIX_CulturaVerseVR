@@ -5,45 +5,47 @@ public class VoiceRecorderPuteri : MonoBehaviour
     private AudioClip clip;
     private bool recording = false;
 
+    public VoicePipelinePuteri pipeline;
+
     void Update()
     {
         if (Input.GetKeyDown(KeyCode.Space))
         {
-            if (!recording)
-            {
-                StartRecording();
-            }
-            else
-            {
-                StopRecording();
-            }
+            StartRecording();
+        }
+
+        if (Input.GetKeyUp(KeyCode.Space))
+        {
+            StopRecording();
         }
     }
 
     void StartRecording()
     {
-        clip = Microphone.Start(null, false, 10, 44100);
+        if (Microphone.devices.Length == 0)
+        {
+            Debug.LogError("No microphone found");
+            return;
+        }
+
+        clip = Microphone.Start(null, false, 5, 16000);
         recording = true;
 
-        Debug.Log("Recording started...");
+        Debug.Log("Recording...");
     }
 
     void StopRecording()
     {
+        if (!recording) return;
+
         Microphone.End(null);
         recording = false;
 
-        Debug.Log("Recording stopped.");
-
-        VoicePipelinePuteri pipeline = Object.FindFirstObjectByType<VoicePipelinePuteri>();
+        Debug.Log("Recording stopped");
 
         if (pipeline != null)
         {
             pipeline.ProcessAudio(clip);
-        }
-        else
-        {
-            Debug.LogError("VoicePipelinePuteri not found in scene!");
         }
     }
 }
