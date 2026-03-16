@@ -7,18 +7,24 @@ using UnityEngine.Networking;
 
 public class VoicePipeline : MonoBehaviour
 {
-    // ── Private fields loaded from config.json ──
-    public string googleApiKey;
-    public string ollamaUrl;
-    public string ollamaModel;
-    public string ttsLanguageCode;
-    public string ttsVoiceName;
-    public string ttsLanguageCodeEn;
-    public string ttsVoiceNameEn;
-    public string characterPromptZh;
-    public string characterPromptEn;
+    // ── Fields loaded from shared config.json ──
+    private string googleApiKey;
+    private string ollamaUrl;
+    private string ollamaModel;
+
+    private string ttsLanguageCodeMs;
+    private string ttsVoiceNameMs;
+    private string ttsLanguageCodeZh;
+    private string ttsVoiceNameZh;
+    private string ttsLanguageCodeEn;
+    private string ttsVoiceNameEn;
+
+    private string promptMs;
+    private string promptZh;
+    private string promptEn;
 
     // ── Language detection ──
+    // Possible values: "ms-MY" | "zh-CN" | "en-US"
     private string detectedLanguage = "zh-CN";
 
     // ── Recording state ──
@@ -41,12 +47,17 @@ public class VoicePipeline : MonoBehaviour
         public string googleApiKey = "";
         public string ollamaUrl = "";
         public string ollamaModel = "";
-        public string ttsLanguageCode = "";
-        public string ttsVoiceName = "";
+
+        public string ttsLanguageCodeMs = "";
+        public string ttsVoiceNameMs = "";
+        public string ttsLanguageCodeZh = "";
+        public string ttsVoiceNameZh = "";
         public string ttsLanguageCodeEn = "";
         public string ttsVoiceNameEn = "";
-        public string characterPromptZh = "";
-        public string characterPromptEn = "";
+
+        public string yuefeiPromptMs = "";
+        public string yuefeiPromptZh = "";
+        public string yuefeiPromptEn = "";
     }
 
     [System.Serializable]
@@ -96,9 +107,7 @@ public class VoicePipeline : MonoBehaviour
         LoadConfig();
 
         foreach (string device in Microphone.devices)
-        {
             Debug.Log("Mic found: " + device);
-        }
 
         isProcessing = true;
         statusMessage = "⏳ Yuefei is speaking...";
@@ -110,27 +119,21 @@ public class VoicePipeline : MonoBehaviour
         yield return new WaitForSeconds(2.5f);
 
         while (characterVoice.isPlaying)
-        {
             yield return null;
-        }
 
         yield return new WaitForSeconds(0.5f);
 
-        isProcessing = false;
-        statusMessage = "Press and Hold SPACE to talk";
+        ResetToIdle();
         Debug.Log("Intro finished — ready for questions!");
     }
 
     void Update()
     {
         if (Input.GetKeyDown(KeyCode.Space) && !isProcessing)
-        {
             StartRecording();
-        }
+
         if (Input.GetKeyUp(KeyCode.Space) && recording)
-        {
             StopRecording();
-        }
     }
 
     void OnGUI()
@@ -138,12 +141,9 @@ public class VoicePipeline : MonoBehaviour
         GUI.color = new Color(0, 0, 0, 0.7f);
         GUI.Box(new Rect(10, 10, 420, 60), "");
 
-        if (recording)
-            GUI.color = Color.red;
-        else if (isProcessing)
-            GUI.color = Color.yellow;
-        else
-            GUI.color = Color.green;
+        if (recording) GUI.color = Color.red;
+        else if (isProcessing) GUI.color = Color.yellow;
+        else GUI.color = Color.green;
 
         GUIStyle style = new GUIStyle();
         style.fontSize = 20;
@@ -154,7 +154,7 @@ public class VoicePipeline : MonoBehaviour
     }
 
     // ─────────────────────────────────────────────
-    //  Config
+    //  Config — reads shared config.json
     // ─────────────────────────────────────────────
 
     void LoadConfig()
@@ -173,15 +173,20 @@ public class VoicePipeline : MonoBehaviour
         googleApiKey = config.googleApiKey;
         ollamaUrl = config.ollamaUrl;
         ollamaModel = config.ollamaModel;
-        ttsLanguageCode = config.ttsLanguageCode;
-        ttsVoiceName = config.ttsVoiceName;
+
+        ttsLanguageCodeMs = config.ttsLanguageCodeMs;
+        ttsVoiceNameMs = config.ttsVoiceNameMs;
+        ttsLanguageCodeZh = config.ttsLanguageCodeZh;
+        ttsVoiceNameZh = config.ttsVoiceNameZh;
         ttsLanguageCodeEn = config.ttsLanguageCodeEn;
         ttsVoiceNameEn = config.ttsVoiceNameEn;
-        characterPromptZh = config.characterPromptZh;
-        characterPromptEn = config.characterPromptEn;
 
-        Debug.Log("Config loaded successfully.");
-        Debug.Log("Prompt ZH: " + characterPromptZh);
+        promptMs = config.yuefeiPromptMs;
+        promptZh = config.yuefeiPromptZh;
+        promptEn = config.yuefeiPromptEn;
+
+        Debug.Log("Yuefei: config.json loaded successfully.");
+        Debug.Log("Prompt ZH: " + promptZh);
     }
 
     // ─────────────────────────────────────────────
@@ -227,6 +232,7 @@ public class VoicePipeline : MonoBehaviour
 
     // ─────────────────────────────────────────────
     //  Step 2 — Google Speech-to-Text
+    //  Primary: zh-CN   Alternatives: ms-MY, en-US
     // ─────────────────────────────────────────────
 
     IEnumerator SendToSTT()
@@ -234,8 +240,7 @@ public class VoicePipeline : MonoBehaviour
         if (string.IsNullOrEmpty(googleApiKey))
         {
             Debug.LogError("Google API key is not loaded.");
-            isProcessing = false;
-            statusMessage = "Press and Hold SPACE to talk";
+            ResetToIdle();
             yield break;
         }
 
@@ -245,12 +250,13 @@ public class VoicePipeline : MonoBehaviour
         byte[] audioData = AudioClipToWav(clip);
         string audioBase64 = System.Convert.ToBase64String(audioData);
         string url = "https://speech.googleapis.com/v1/speech:recognize?key=" + googleApiKey;
+
         string json = @"{
             ""config"": {
                 ""encoding"": ""LINEAR16"",
                 ""sampleRateHertz"": 16000,
                 ""languageCode"": ""zh-CN"",
-                ""alternativeLanguageCodes"": [""en-US""]
+                ""alternativeLanguageCodes"": [""ms-MY"", ""en-US""]
             },
             ""audio"": {
                 ""content"": """ + audioBase64 + @"""
@@ -268,8 +274,7 @@ public class VoicePipeline : MonoBehaviour
         if (request.result != UnityWebRequest.Result.Success)
         {
             Debug.LogError("STT Error: " + request.error);
-            isProcessing = false;
-            statusMessage = "Press and Hold SPACE to talk";
+            ResetToIdle();
             yield break;
         }
 
@@ -281,18 +286,52 @@ public class VoicePipeline : MonoBehaviour
         if (sttResponse.results != null && sttResponse.results.Length > 0)
         {
             string transcript = sttResponse.results[0].alternatives[0].transcript;
-            bool isChinese = Regex.IsMatch(transcript, @"[\u4e00-\u9fff]");
-            detectedLanguage = isChinese ? "zh-CN" : "en-US";
+            detectedLanguage = DetectLanguage(transcript);
+
             Debug.Log("Transcript: " + transcript);
             Debug.Log("Detected language: " + detectedLanguage);
+
             StartCoroutine(SendToOllama(transcript));
         }
         else
         {
             Debug.LogWarning("No transcript found in STT response.");
-            isProcessing = false;
-            statusMessage = "Press and Hold SPACE to talk";
+            ResetToIdle();
         }
+    }
+
+    // ─────────────────────────────────────────────
+    //  Language detection
+    //  Chinese chars  → zh-CN
+    //  Malay keywords → ms-MY
+    //  Fallback       → en-US
+    // ─────────────────────────────────────────────
+
+    string DetectLanguage(string text)
+    {
+        // 1. Chinese characters → Mandarin
+        if (Regex.IsMatch(text, @"[\u4e00-\u9fff]"))
+            return "zh-CN";
+
+        // 2. Common Malay words → Malay
+        string lower = text.ToLower();
+        string[] malayMarkers = {
+            "apa", "siapa", "kenapa", "bagaimana", "di mana",
+            "awak", "kamu", "saya", "anda", "dengan", "untuk",
+            "tidak", "ada", "adalah", "ini", "itu", "yang",
+            "boleh", "mahu", "sudah", "belum", "bukan", "juga",
+            "cerita", "siapakah", "apakah", "mengapa", "kau",
+            "dia", "mereka", "kami", "kita", "punya", "sangat"
+        };
+
+        foreach (string marker in malayMarkers)
+        {
+            if (lower.Contains(marker))
+                return "ms-MY";
+        }
+
+        // 3. Default → English
+        return "en-US";
     }
 
     // ─────────────────────────────────────────────
@@ -304,24 +343,22 @@ public class VoicePipeline : MonoBehaviour
         if (string.IsNullOrEmpty(ollamaUrl))
         {
             Debug.LogError("Ollama URL is not loaded.");
-            isProcessing = false;
-            statusMessage = "Press and Hold SPACE to talk";
+            ResetToIdle();
             yield break;
         }
 
         statusMessage = "🤖 AI is thinking...";
         Debug.Log("Sending to Ollama...");
 
-        string characterPrompt = detectedLanguage == "zh-CN"
-            ? characterPromptZh
-            : characterPromptEn;
-
-        string fullPrompt = characterPrompt + text;
+        string characterPrompt =
+            detectedLanguage == "zh-CN" ? promptZh :
+            detectedLanguage == "ms-MY" ? promptMs :
+            promptEn;
 
         var ollamaRequest = new OllamaRequest
         {
             model = ollamaModel,
-            prompt = fullPrompt,
+            prompt = characterPrompt + text,
             stream = false
         };
 
@@ -340,19 +377,17 @@ public class VoicePipeline : MonoBehaviour
         if (request.result != UnityWebRequest.Result.Success)
         {
             Debug.LogError("Ollama Error: " + request.error);
-            isProcessing = false;
-            statusMessage = "Press and Hold SPACE to talk";
+            ResetToIdle();
             yield break;
         }
 
         OllamaResponse ollamaResponse = JsonUtility.FromJson<OllamaResponse>(request.downloadHandler.text);
-        string replyText = ollamaResponse.response;
-
-        replyText = replyText.Replace("\n", " ")
-                             .Replace("\r", " ")
-                             .Replace("\"", "'")
-                             .Replace("\\", " ")
-                             .Trim();
+        string replyText = ollamaResponse.response
+            .Replace("\n", " ")
+            .Replace("\r", " ")
+            .Replace("\"", "'")
+            .Replace("\\", " ")
+            .Trim();
 
         Debug.Log("Ollama reply: " + replyText);
         StartCoroutine(SendToTTS(replyText));
@@ -370,38 +405,34 @@ public class VoicePipeline : MonoBehaviour
         if (string.IsNullOrEmpty(googleApiKey))
         {
             Debug.LogError("Google API key not loaded.");
-            isProcessing = false;
-            statusMessage = "Press and Hold SPACE to talk";
+            ResetToIdle();
             yield break;
         }
 
         statusMessage = "🔊 Generating voice...";
         Debug.Log("Sending to TTS...");
 
-        string voiceLanguage = detectedLanguage == "zh-CN" ? ttsLanguageCode : ttsLanguageCodeEn;
-        string voiceName = detectedLanguage == "zh-CN" ? ttsVoiceName : ttsVoiceNameEn;
+        string voiceLanguage =
+            detectedLanguage == "zh-CN" ? ttsLanguageCodeZh :
+            detectedLanguage == "ms-MY" ? ttsLanguageCodeMs :
+            ttsLanguageCodeEn;
 
-        // Escape any double-quotes or backslashes inside the reply text
+        string voiceName =
+            detectedLanguage == "zh-CN" ? ttsVoiceNameZh :
+            detectedLanguage == "ms-MY" ? ttsVoiceNameMs :
+            ttsVoiceNameEn;
+
         string safeText = text.Replace("\\", "\\\\").Replace("\"", "\\\"");
-
-        // Build SSML string
         string ssmlText = "<speak><prosody rate='slow' pitch='-2st'>" + safeText + "</prosody></speak>";
 
-        // Manually build JSON so only "ssml" is present inside "input" (no "text" field).
-        // Using JsonUtility would serialize BOTH fields even when one is null/empty,
-        // which triggers Google's "oneof field 'input_source' is already set" 400 error.
         string json = "{"
-            + "\"input\":{"
-                + "\"ssml\":\"" + ssmlText + "\""
-            + "},"
+            + "\"input\":{ \"ssml\":\"" + ssmlText + "\" },"
             + "\"voice\":{"
                 + "\"languageCode\":\"" + voiceLanguage + "\","
                 + "\"name\":\"" + voiceName + "\","
                 + "\"ssmlGender\":\"MALE\""
             + "},"
-            + "\"audioConfig\":{"
-                + "\"audioEncoding\":\"MP3\""
-            + "}"
+            + "\"audioConfig\":{ \"audioEncoding\":\"MP3\" }"
         + "}";
 
         Debug.Log("TTS JSON: " + json);
@@ -420,13 +451,11 @@ public class VoicePipeline : MonoBehaviour
         {
             Debug.LogError("TTS Error: " + request.error);
             Debug.LogError("TTS Response: " + request.downloadHandler.text);
-            isProcessing = false;
-            statusMessage = "Press and Hold SPACE to talk";
+            ResetToIdle();
             yield break;
         }
 
-        string responseText = request.downloadHandler.text;
-        TTSResponse ttsResponse = JsonUtility.FromJson<TTSResponse>(responseText);
+        TTSResponse ttsResponse = JsonUtility.FromJson<TTSResponse>(request.downloadHandler.text);
         byte[] mp3Data = System.Convert.FromBase64String(ttsResponse.audioContent);
 
         StartCoroutine(PlayMp3(mp3Data));
@@ -443,16 +472,14 @@ public class VoicePipeline : MonoBehaviour
         string tempPath = Application.temporaryCachePath + "/tts_output.mp3";
         File.WriteAllBytes(tempPath, mp3Data);
 
-        string fileUrl = "file://" + tempPath;
-        using (UnityWebRequest audioRequest = UnityWebRequestMultimedia.GetAudioClip(fileUrl, AudioType.MPEG))
+        using (UnityWebRequest audioRequest = UnityWebRequestMultimedia.GetAudioClip("file://" + tempPath, AudioType.MPEG))
         {
             yield return audioRequest.SendWebRequest();
 
             if (audioRequest.result != UnityWebRequest.Result.Success)
             {
                 Debug.LogError("Audio load error: " + audioRequest.error);
-                isProcessing = false;
-                statusMessage = "Press and Hold SPACE to talk";
+                ResetToIdle();
                 yield break;
             }
 
@@ -460,27 +487,28 @@ public class VoicePipeline : MonoBehaviour
             characterVoice.clip = ttsClip;
             characterVoice.Play();
 
-            // Start talking animation
             if (characterAnimator != null)
                 characterAnimator.SetBool("IsTalking", true);
 
             Debug.Log("Character is speaking...");
-
             yield return new WaitForSeconds(ttsClip.length);
 
-            // Return to idle
             if (characterAnimator != null)
-            {
                 characterAnimator.SetBool("IsTalking", false);
-                Debug.Log("Returned to idle.");
-            }
             else
-            {
                 Debug.LogError("characterAnimator is NULL — not assigned!");
-            }
 
-            isProcessing = false;
-            statusMessage = "Press and Hold SPACE to talk";
+            ResetToIdle();
         }
+    }
+
+    // ─────────────────────────────────────────────
+    //  Helper
+    // ─────────────────────────────────────────────
+
+    void ResetToIdle()
+    {
+        isProcessing = false;
+        statusMessage = "Press and Hold SPACE to talk";
     }
 }

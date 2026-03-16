@@ -193,37 +193,19 @@ PrefabInstance:
     m_AddedComponents:
     - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 40a0557b05c76144b8c6cce5bbf44868, type: 3}
       insertIndex: -1
-      addedObject: {fileID: 867425522}
-    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 40a0557b05c76144b8c6cce5bbf44868, type: 3}
-      insertIndex: -1
       addedObject: {fileID: 867425523}
     - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 40a0557b05c76144b8c6cce5bbf44868, type: 3}
       insertIndex: -1
-      addedObject: {fileID: 867425527}
+      addedObject: {fileID: 867425526}
     - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 40a0557b05c76144b8c6cce5bbf44868, type: 3}
       insertIndex: -1
-      addedObject: {fileID: 867425526}
+      addedObject: {fileID: 867425530}
   m_SourcePrefab: {fileID: 100100000, guid: 40a0557b05c76144b8c6cce5bbf44868, type: 3}
 --- !u!1 &867425519 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: 40a0557b05c76144b8c6cce5bbf44868, type: 3}
   m_PrefabInstance: {fileID: 118833957}
   m_PrefabAsset: {fileID: 0}
---- !u!114 &867425522
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 867425519}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 2cd3087a2cfa2e24c96e6df3ea9a1682, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: '::'
-  animator: {fileID: 867425528}
-  audioSource: {fileID: 867425523}
-  voiceClip: {fileID: 8300000, guid: 142bc5727ca3e0a4fa22710a104aec53, type: 3}
 --- !u!82 &867425523
 AudioSource:
   m_ObjectHideFlags: 0
@@ -235,7 +217,7 @@ AudioSource:
   serializedVersion: 4
   OutputAudioMixerGroup: {fileID: 0}
   m_audioClip: {fileID: 0}
-  m_Resource: {fileID: 8300000, guid: 142bc5727ca3e0a4fa22710a104aec53, type: 3}
+  m_Resource: {fileID: 0}
   m_PlayOnAwake: 1
   m_Volume: 1
   m_Pitch: 1
@@ -333,11 +315,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 99791bf8be41b414b83708c9b8be425c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::VoicePipelinePuteri
-  googleApiKey: 
-  claudeApiKey: 
   characterVoice: {fileID: 867425523}
-  characterAnimator: {fileID: 0}
---- !u!114 &867425527
+  characterAnimator: {fileID: 867425528}
+--- !u!95 &867425528 stripped
+Animator:
+  m_CorrespondingSourceObject: {fileID: 5866666021909216657, guid: 40a0557b05c76144b8c6cce5bbf44868, type: 3}
+  m_PrefabInstance: {fileID: 118833957}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &867425530
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -346,15 +331,12 @@ MonoBehaviour:
   m_GameObject: {fileID: 867425519}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 43c5bddb2ed681340827c8db3b719f26, type: 3}
+  m_Script: {fileID: 11500000, guid: f2207f7c2f6a8eb48aa434a72088a252, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::VoiceRecorderPuteri
-  pipeline: {fileID: 0}
---- !u!95 &867425528 stripped
-Animator:
-  m_CorrespondingSourceObject: {fileID: 5866666021909216657, guid: 40a0557b05c76144b8c6cce5bbf44868, type: 3}
-  m_PrefabInstance: {fileID: 118833957}
-  m_PrefabAsset: {fileID: 0}
+  m_EditorClassIdentifier: Assembly-CSharp::MalayVoiceTalk
+  animator: {fileID: 867425528}
+  audioSource: {fileID: 867425523}
+  voiceClip: {fileID: 8300000, guid: 142bc5727ca3e0a4fa22710a104aec53, type: 3}
 --- !u!1001 &1481325008
 PrefabInstance:
   m_ObjectHideFlags: 0
