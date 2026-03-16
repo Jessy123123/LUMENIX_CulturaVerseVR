@@ -212,9 +212,12 @@ public class VoicePipelinePuteri : MonoBehaviour
         StartCoroutine(SendToSTT());
     }
 
-    byte[] AudioClipToWav(AudioClip clip)
+    // ─────────────────────────────────────────────
+    // Convert AudioClip to raw PCM bytes (LINEAR16)
+    // ─────────────────────────────────────────────
+    byte[] AudioClipToPCM(AudioClip clip)
     {
-        float[] samples = new float[clip.samples];
+        float[] samples = new float[clip.samples * clip.channels];
         clip.GetData(samples, 0);
         byte[] bytes = new byte[samples.Length * 2];
         int offset = 0;
