@@ -8,15 +8,15 @@ using UnityEngine.Networking;
 public class VoicePipeline : MonoBehaviour
 {
     // ── Private fields loaded from config.json ──
-    public string googleApiKey = "";
-    public string ollamaUrl = "";
-    public string ollamaModel = "";
-    public string ttsLanguageCode = "";
-    public string ttsVoiceName = "";
-    public string ttsLanguageCodeEn = "";
-    public string ttsVoiceNameEn = "";
-    public string characterPromptZh = "";
-    public string characterPromptEn = "";
+    public string googleApiKey;
+    public string ollamaUrl;
+    public string ollamaModel;
+    public string ttsLanguageCode;
+    public string ttsVoiceName;
+    public string ttsLanguageCodeEn;
+    public string ttsVoiceNameEn;
+    public string characterPromptZh;
+    public string characterPromptEn;
 
     // ── Language detection ──
     private string detectedLanguage = "zh-CN";
@@ -38,15 +38,15 @@ public class VoicePipeline : MonoBehaviour
     [System.Serializable]
     private class ConfigData
     {
-        public string googleApiKey;
-        public string ollamaUrl;
-        public string ollamaModel;
-        public string ttsLanguageCode;
-        public string ttsVoiceName;
-        public string ttsLanguageCodeEn;
-        public string ttsVoiceNameEn;
-        public string characterPromptZh;
-        public string characterPromptEn;
+        public string googleApiKey = "";
+        public string ollamaUrl = "";
+        public string ollamaModel = "";
+        public string ttsLanguageCode = "";
+        public string ttsVoiceName = "";
+        public string ttsLanguageCodeEn = "";
+        public string ttsVoiceNameEn = "";
+        public string characterPromptZh = "";
+        public string characterPromptEn = "";
     }
 
     [System.Serializable]
