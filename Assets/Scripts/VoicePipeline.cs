@@ -212,7 +212,7 @@ public class VoicePipeline : MonoBehaviour
         StartCoroutine(SendToSTT());
     }
 
-    byte[] AudioClipToWav(AudioClip clip)
+    public static byte[] AudioClipToWav(AudioClip clip)
     {
         float[] samples = new float[clip.samples];
         clip.GetData(samples, 0);

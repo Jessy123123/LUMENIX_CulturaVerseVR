@@ -250,7 +250,7 @@ public class VoicePipelinePuteri : MonoBehaviour
         statusMessage = "⏳ Converting speech to text...";
         Debug.Log("Sending to STT...");
 
-        byte[] audioData = AudioClipToWav(clip);
+        byte[] audioData = VoicePipeline.AudioClipToWav (clip);
         string audioBase64 = System.Convert.ToBase64String(audioData);
         string url = "https://speech.googleapis.com/v1/speech:recognize?key=" + googleApiKey;
 
