@@ -221,6 +221,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2cd3087a2cfa2e24c96e6df3ea9a1682, type: 3}
   m_Name: 
   m_EditorClassIdentifier: '::'
+  animator: {fileID: 867425528}
+  audioSource: {fileID: 867425523}
+  voiceClip: {fileID: 8300000, guid: 142bc5727ca3e0a4fa22710a104aec53, type: 3}
 --- !u!82 &867425523
 AudioSource:
   m_ObjectHideFlags: 0
@@ -347,6 +350,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::VoiceRecorderPuteri
   pipeline: {fileID: 0}
+--- !u!95 &867425528 stripped
+Animator:
+  m_CorrespondingSourceObject: {fileID: 5866666021909216657, guid: 40a0557b05c76144b8c6cce5bbf44868, type: 3}
+  m_PrefabInstance: {fileID: 118833957}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1001 &1481325008
 PrefabInstance:
   m_ObjectHideFlags: 0

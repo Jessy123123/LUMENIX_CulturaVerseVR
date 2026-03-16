@@ -1,20 +1,43 @@
 using UnityEngine;
+using System.Collections;
 
-public class PuteriTalk : MonoBehaviour
+public class PuteriMovement : MonoBehaviour
 {
-    Animator animator;
+    public Animator animator;
+    public AudioSource audioSource;
+    public AudioClip voiceClip;
 
-    void Start()
+    IEnumerator Start()
     {
-        animator = GetComponent<Animator>();
+        // Wait 2 seconds after scene starts
+        yield return new WaitForSeconds(2f);
+
+        StartTalking();
     }
 
-    void Update()
+    public void StartTalking()
     {
-        if (Input.GetKeyDown(KeyCode.T))
+        StartCoroutine(TalkRoutine());
+    }
+
+    IEnumerator TalkRoutine()
+    {
+        // Start talking animation
+        if (animator != null)
+            animator.SetBool("IsTalking", true);
+
+        // Play voice
+        if (audioSource != null && voiceClip != null)
         {
-            animator.Play("stand-talk-378997");
-            Debug.Log("Talking animation triggered");
+            audioSource.clip = voiceClip;
+            audioSource.Play();
         }
+
+        // Wait until voice finishes
+        yield return new WaitWhile(() => audioSource.isPlaying);
+
+        // Return to idle
+        if (animator != null)
+            animator.SetBool("IsTalking", false);
     }
 }
