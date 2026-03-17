@@ -1,8 +1,9 @@
 using UnityEngine;
+using System.Collections; // Required for Coroutines
 using UnityEngine.Rendering; // Required for Post-Processing
 using UnityEngine.Rendering.Universal; // Use .HighDefinition if using HDRP
 
-public class EnvironmentManager : MonoBehaviour
+public class EnvironmentManagerPuteri : MonoBehaviour
 {
     public GameObject normalEnvironment;
     public GameObject gloomyEnvironment;
@@ -44,12 +45,15 @@ public class EnvironmentManager : MonoBehaviour
             if (rainParticles != null) rainParticles.Stop();
             RenderSettings.skybox = angrySkybox; // Changes the sky color
             DynamicGI.UpdateEnvironment();       // Refreshes the lighting
+            TriggerThunder(); // Flash lightning when angry
         }
         else
         {
             normalEnvironment.SetActive(true);
             gloomyEnvironment.SetActive(false);
             angryEnvironment.SetActive(false);
+            RenderSettings.skybox = normalSkybox;
+            DynamicGI.UpdateEnvironment();       // Refreshes the lighting
 
             if (rainParticles != null) rainParticles.Stop();
         }

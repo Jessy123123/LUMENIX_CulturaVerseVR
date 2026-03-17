@@ -5,8 +5,12 @@ using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityEngine.Networking;
 
+
 public class VoicePipelinePuteri : MonoBehaviour
 {
+    [Header("Environment Bridge")]
+    public AIBridgePuteri bridge; 
+
     // ── Fields loaded from shared config.json ──
     private string googleApiKey;
     private string ollamaUrl;
@@ -182,8 +186,8 @@ public class VoicePipelinePuteri : MonoBehaviour
         ttsVoiceNameEn = config.ttsVoiceNameEn;
 
         promptMs = config.puteriPromptMs;
-        promptZh = config.puteriPromptZh;
         promptEn = config.puteriPromptEn;
+        promptEn = config.puteriPromptZh;
 
         Debug.Log("Puteri: config.json loaded successfully.");
     }
@@ -457,8 +461,9 @@ public class VoicePipelinePuteri : MonoBehaviour
 
         var ollamaRequest = new OllamaRequest
         {
+            // We add "User: " and "Puteri: " to tell the AI it's a dialogue
             model = ollamaModel,
-            prompt = characterPrompt + text,
+            prompt = characterPrompt + "\n\nUser: " + text + "\nPuteri:",
             stream = false
         };
 
@@ -490,6 +495,25 @@ public class VoicePipelinePuteri : MonoBehaviour
             .Trim();
 
         Debug.Log("Ollama reply: " + replyText);
+
+        // Adding the emotion detection based on keywords in the reply
+        string detectedEmotion = "Normal"; // Default
+        string lowerReply = replyText.ToLower();
+
+        if (lowerReply.Contains("sedih") || lowerReply.Contains("sad") || lowerReply.Contains("kecewa"))
+        {
+            detectedEmotion = "Sad";
+        }
+        else if (lowerReply.Contains("marah") || lowerReply.Contains("angry") || lowerReply.Contains("benci"))
+        {
+            detectedEmotion = "Angry";
+        }
+
+        // Tell the bridge to change the environment!
+        if (bridge != null)
+        {
+            bridge.OnAIResponseReceived(detectedEmotion);
+        }
         StartCoroutine(SendToTTS(replyText));
     }
 
