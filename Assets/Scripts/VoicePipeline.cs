@@ -7,6 +7,7 @@ using UnityEngine.Networking;
 
 public class VoicePipeline : MonoBehaviour
 {
+    [Header("Environment Bridge")]     public AI_bridge_YueFei bridge;
     // ── Fields loaded from shared config.json ──
     private string googleApiKey;
     private string ollamaUrl;
@@ -390,7 +391,40 @@ public class VoicePipeline : MonoBehaviour
             .Trim();
 
         Debug.Log("Ollama reply: " + replyText);
+        // Adding the emotion detection based on keywords in the reply
+
+        string detectedEmotion = "Normal"; // Default
+
+        string lowerReply = replyText.ToLower();
+        
+        if (lowerReply.Contains("sedih") || lowerReply.Contains("sad") || lowerReply.Contains("kecewa"))
+
+        {
+
+            detectedEmotion = "Sad";
+
+        }
+
+        else if (lowerReply.Contains("marah") || lowerReply.Contains("angry") || lowerReply.Contains("benci"))
+
+        {
+
+            detectedEmotion = "Angry";
+
+        }
+        
+        // Tell the bridge to change the environment!
+
+        if (bridge != null)
+
+        {
+
+            bridge.OnAIResponseReceived(detectedEmotion);
+
+        }
+ 
         StartCoroutine(SendToTTS(replyText));
+        
     }
 
     // ─────────────────────────────────────────────
