@@ -7,39 +7,51 @@ using UnityEngine.Networking;
 
 public class VoicePipeline : MonoBehaviour
 {
-    // ── Fields loaded from shared config.json ──
+    // ── Inspector ─────────────────────────────────────────────────────────
+    [Header("Environment Bridge")]
+    public AIBridgeYueFei bridge;
+
+    [Header("NPC References")]
+    public AudioSource characterVoice;
+    public Animator characterAnimator;
+
+    // ── Config (loaded from StreamingAssets/config.json) ──────────────────
     private string googleApiKey;
     private string ollamaUrl;
     private string ollamaModel;
 
-    private string ttsLanguageCodeMs;
-    private string ttsVoiceNameMs;
+    // TTS — Mandarin
     private string ttsLanguageCodeZh;
     private string ttsVoiceNameZh;
+
+    // TTS — English
     private string ttsLanguageCodeEn;
     private string ttsVoiceNameEn;
 
-    private string promptMs;
-    private string promptZh;
-    private string promptEn;
+    // TTS — Malay
+    private string ttsLanguageCodeMs;
+    private string ttsVoiceNameMs;
+
+    // Character prompts per language
+    private string characterPromptZh;
+    private string characterPromptEn;
+    private string characterPromptMs;
 
     // ── Language detection ──
-    // Possible values: "ms-MY" | "zh-CN" | "en-US"
     private string detectedLanguage = "zh-CN";
 
-    // ── Recording state ──
+    // ── Recording state ───────────────────────────────────────────────────
     private AudioClip clip;
     private bool recording = false;
     private bool isProcessing = false;
-    private string statusMessage = "⏳ Yuefei is speaking...";
+    private string statusMessage = "⏳ Yue Fei is speaking...";
 
-    // ── Assign in Inspector ──
-    public AudioSource characterVoice;
-    public Animator characterAnimator;
+    // ── EmotionDetector (auto-attached) ───────────────────────────────────
+    private EmotionDetector emotionDetector;
 
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
     //  Data classes
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
 
     [System.Serializable]
     private class ConfigData
@@ -48,16 +60,18 @@ public class VoicePipeline : MonoBehaviour
         public string ollamaUrl = "";
         public string ollamaModel = "";
 
-        public string ttsLanguageCodeMs = "";
-        public string ttsVoiceNameMs = "";
         public string ttsLanguageCodeZh = "";
         public string ttsVoiceNameZh = "";
+
         public string ttsLanguageCodeEn = "";
         public string ttsVoiceNameEn = "";
 
-        public string yuefeiPromptMs = "";
-        public string yuefeiPromptZh = "";
-        public string yuefeiPromptEn = "";
+        public string ttsLanguageCodeMs = "";
+        public string ttsVoiceNameMs = "";
+
+        public string characterPromptZh = "";
+        public string characterPromptEn = "";
+        public string characterPromptMs = "";
     }
 
     [System.Serializable]
@@ -98,19 +112,24 @@ public class VoicePipeline : MonoBehaviour
         public string audioContent = "";
     }
 
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
     //  Unity lifecycle
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
 
     void Start()
     {
         LoadConfig();
 
+        // Auto-attach EmotionDetector — no manual setup needed
+        emotionDetector = gameObject.GetComponent<EmotionDetector>();
+        if (emotionDetector == null)
+            emotionDetector = gameObject.AddComponent<EmotionDetector>();
+
         foreach (string device in Microphone.devices)
             Debug.Log("Mic found: " + device);
 
         isProcessing = true;
-        statusMessage = "⏳ Yuefei is speaking...";
+        statusMessage = "⏳ Yue Fei is speaking...";
         StartCoroutine(WaitForIntro());
     }
 
@@ -153,9 +172,9 @@ public class VoicePipeline : MonoBehaviour
         GUI.Label(new Rect(15, 15, 410, 50), statusMessage, style);
     }
 
-    // ─────────────────────────────────────────────
-    //  Config — reads shared config.json
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    //  Config loader
+    // ─────────────────────────────────────────────────────────────────────
 
     void LoadConfig()
     {
@@ -174,24 +193,25 @@ public class VoicePipeline : MonoBehaviour
         ollamaUrl = config.ollamaUrl;
         ollamaModel = config.ollamaModel;
 
-        ttsLanguageCodeMs = config.ttsLanguageCodeMs;
-        ttsVoiceNameMs = config.ttsVoiceNameMs;
         ttsLanguageCodeZh = config.ttsLanguageCodeZh;
         ttsVoiceNameZh = config.ttsVoiceNameZh;
+
         ttsLanguageCodeEn = config.ttsLanguageCodeEn;
         ttsVoiceNameEn = config.ttsVoiceNameEn;
 
-        promptMs = config.yuefeiPromptMs;
-        promptZh = config.yuefeiPromptZh;
-        promptEn = config.yuefeiPromptEn;
+        ttsLanguageCodeMs = config.ttsLanguageCodeMs;
+        ttsVoiceNameMs = config.ttsVoiceNameMs;
 
-        Debug.Log("Yuefei: config.json loaded successfully.");
-        Debug.Log("Prompt ZH: " + promptZh);
+        characterPromptZh = config.characterPromptZh;
+        characterPromptEn = config.characterPromptEn;
+        characterPromptMs = config.characterPromptMs;
+
+        Debug.Log("VoicePipeline: config.json loaded successfully.");
     }
 
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
     //  Step 1 — Record microphone
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
 
     void StartRecording()
     {
@@ -230,10 +250,10 @@ public class VoicePipeline : MonoBehaviour
         return bytes;
     }
 
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
     //  Step 2 — Google Speech-to-Text
-    //  Primary: zh-CN   Alternatives: ms-MY, en-US
-    // ─────────────────────────────────────────────
+    //  Primary: cmn-CN   Alternatives: en-US, ms-MY
+    // ─────────────────────────────────────────────────────────────────────
 
     IEnumerator SendToSTT()
     {
@@ -255,8 +275,8 @@ public class VoicePipeline : MonoBehaviour
             ""config"": {
                 ""encoding"": ""LINEAR16"",
                 ""sampleRateHertz"": 16000,
-                ""languageCode"": ""zh-CN"",
-                ""alternativeLanguageCodes"": [""ms-MY"", ""en-US""]
+                ""languageCode"": ""cmn-CN"",
+                ""alternativeLanguageCodes"": [""en-US"", ""ms-MY""]
             },
             ""audio"": {
                 ""content"": """ + audioBase64 + @"""
@@ -279,9 +299,9 @@ public class VoicePipeline : MonoBehaviour
         }
 
         string responseText = request.downloadHandler.text;
-        Debug.Log("STT Response: " + responseText);
-
         STTResponse sttResponse = JsonUtility.FromJson<STTResponse>(responseText);
+
+        Debug.Log("STT Response: " + responseText);
 
         if (sttResponse.results != null && sttResponse.results.Length > 0)
         {
@@ -300,43 +320,40 @@ public class VoicePipeline : MonoBehaviour
         }
     }
 
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
     //  Language detection
-    //  Chinese chars  → zh-CN
-    //  Malay keywords → ms-MY
-    //  Fallback       → en-US
-    // ─────────────────────────────────────────────
+    //  Chinese chars   → zh-CN
+    //  Malay keywords  → ms-MY
+    //  Fallback        → en-US
+    // ─────────────────────────────────────────────────────────────────────
 
     string DetectLanguage(string text)
     {
-        // 1. Chinese characters → Mandarin
         if (Regex.IsMatch(text, @"[\u4e00-\u9fff]"))
             return "zh-CN";
 
-        // 2. Common Malay words → Malay
         string lower = text.ToLower();
-        string[] malayMarkers = {
+        string[] malayMarkers =
+        {
             "apa", "siapa", "kenapa", "bagaimana", "di mana",
             "awak", "kamu", "saya", "anda", "dengan", "untuk",
             "tidak", "ada", "adalah", "ini", "itu", "yang",
             "boleh", "mahu", "sudah", "belum", "bukan", "juga",
             "cerita", "siapakah", "apakah", "mengapa", "kau",
-            "dia", "mereka", "kami", "kita", "punya", "sangat"
+            "dia", "mereka", "kami", "kita", "punya", "sangat",
+            "encik", "cikgu", "tuan", "puan", "selamat", "terima"
         };
 
         foreach (string marker in malayMarkers)
-        {
             if (lower.Contains(marker))
                 return "ms-MY";
-        }
 
-        // 3. Default → English
         return "en-US";
     }
 
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
     //  Step 3 — Ollama local LLM
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
 
     IEnumerator SendToOllama(string text)
     {
@@ -350,15 +367,15 @@ public class VoicePipeline : MonoBehaviour
         statusMessage = "🤖 AI is thinking...";
         Debug.Log("Sending to Ollama...");
 
-        string characterPrompt =
-            detectedLanguage == "zh-CN" ? promptZh :
-            detectedLanguage == "ms-MY" ? promptMs :
-            promptEn;
+        string prompt =
+            detectedLanguage == "zh-CN" ? characterPromptZh :
+            detectedLanguage == "ms-MY" ? characterPromptMs :
+            characterPromptEn;
 
         var ollamaRequest = new OllamaRequest
         {
             model = ollamaModel,
-            prompt = characterPrompt + text,
+            prompt = prompt + text,
             stream = false
         };
 
@@ -390,15 +407,43 @@ public class VoicePipeline : MonoBehaviour
             .Trim();
 
         Debug.Log("Ollama reply: " + replyText);
+
+        // Detect emotion locally then speak
+        StartCoroutine(DetectEmotionThenSpeak(replyText));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  Step 4 — Emotion detection via local Ollama (zero cost)
+    //  Drives AIBridgeGunung environment changes.
+    // ─────────────────────────────────────────────────────────────────────
+
+    IEnumerator DetectEmotionThenSpeak(string replyText)
+    {
+        statusMessage = "🎭 Reading emotion...";
+
+        string dominantEmotion = "neutral";
+
+        yield return StartCoroutine(
+            emotionDetector.DetectEmotion(
+                replyText,
+                ollamaUrl,
+                ollamaModel,
+                result => dominantEmotion = result
+            )
+        );
+
+        Debug.Log("Emotion detected: " + dominantEmotion);
+
+        // Tell the bridge — changes battlefield environment based on emotion
+        if (bridge != null)
+            bridge.OnAIResponseReceived(dominantEmotion);
+
         StartCoroutine(SendToTTS(replyText));
     }
 
-    // ─────────────────────────────────────────────
-    //  Step 4 — Google Text-to-Speech
-    //  FIX: Build JSON manually to avoid JsonUtility
-    //  serializing both "text" and "ssml" fields,
-    //  which causes a 400 "oneof input_source" error.
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    //  Step 5 — Google Text-to-Speech (male, -2st pitch)
+    // ─────────────────────────────────────────────────────────────────────
 
     IEnumerator SendToTTS(string text)
     {
@@ -438,7 +483,6 @@ public class VoicePipeline : MonoBehaviour
         Debug.Log("TTS JSON: " + json);
 
         string url = "https://texttospeech.googleapis.com/v1/text:synthesize?key=" + googleApiKey;
-
         UnityWebRequest request = new UnityWebRequest(url, "POST");
         byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
         request.uploadHandler = new UploadHandlerRaw(bodyRaw);
@@ -461,18 +505,19 @@ public class VoicePipeline : MonoBehaviour
         StartCoroutine(PlayMp3(mp3Data));
     }
 
-    // ─────────────────────────────────────────────
-    //  Step 5 — Play voice on NPC
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    //  Step 6 — Play voice on NPC
+    // ─────────────────────────────────────────────────────────────────────
 
     IEnumerator PlayMp3(byte[] mp3Data)
     {
-        statusMessage = "💬 Character is speaking...";
+        statusMessage = "💬 Yue Fei is speaking...";
 
         string tempPath = Application.temporaryCachePath + "/tts_output.mp3";
         File.WriteAllBytes(tempPath, mp3Data);
 
-        using (UnityWebRequest audioRequest = UnityWebRequestMultimedia.GetAudioClip("file://" + tempPath, AudioType.MPEG))
+        using (UnityWebRequest audioRequest = UnityWebRequestMultimedia.GetAudioClip(
+                   "file://" + tempPath, AudioType.MPEG))
         {
             yield return audioRequest.SendWebRequest();
 
@@ -490,21 +535,21 @@ public class VoicePipeline : MonoBehaviour
             if (characterAnimator != null)
                 characterAnimator.SetBool("IsTalking", true);
 
-            Debug.Log("Character is speaking...");
+            Debug.Log("Yue Fei is speaking...");
             yield return new WaitForSeconds(ttsClip.length);
 
             if (characterAnimator != null)
                 characterAnimator.SetBool("IsTalking", false);
             else
-                Debug.LogError("characterAnimator is NULL — not assigned!");
+                Debug.LogError("characterAnimator is NULL — not assigned in Inspector!");
 
             ResetToIdle();
         }
     }
 
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
     //  Helper
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
 
     void ResetToIdle()
     {

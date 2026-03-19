@@ -1,84 +1,96 @@
-﻿using UnityEngine;
-using System.Collections;
+﻿using System.Collections;
+using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
+using UnityEngine;
 using UnityEngine.Networking;
 
-
+/// <summary>
+/// VoicePipelinePuteri — voice pipeline for the Puteri Gunung Ledang NPC.
+///
+/// Pipeline:
+///   SPACE held  →  Microphone (16 kHz, max 5 s)
+///               →  Google STT  (primary: ms-MY, fallback: zh-CN, en-US)
+///               →  DetectLanguage()
+///               →  Ollama LLM  (character reply)
+///               →  EmotionDetector  (Ollama second call — zero cost, local)
+///               →  AIBridgePuteri.OnAIResponseReceived(emotion)
+///               →  Google TTS  (female voice, +2st pitch)
+///               →  AudioSource playback + Animator IsTalking
+///
+/// FIX: Uses manual JSON parsing instead of JsonUtility to handle
+///      Unicode characters and long prompt strings in config.json.
+/// </summary>
 public class VoicePipelinePuteri : MonoBehaviour
 {
+    // ── Inspector ─────────────────────────────────────────────────────────
     [Header("Environment Bridge")]
-    public AIBridgePuteri bridge; 
+    public AIBridgePuteri bridge;
 
-    // ── Fields loaded from shared config.json ──
+    [Header("NPC References")]
+    public AudioSource characterVoice;
+    public Animator characterAnimator;
+
+    // ── Config (loaded from StreamingAssets/config.json) ──────────────────
     private string googleApiKey;
     private string ollamaUrl;
     private string ollamaModel;
 
-    public string statusMessage = "";
+    private string ttsLanguageCodeMs;
+    private string ttsVoiceNameMs;
+    private string ttsLanguageCodeZh;
+    private string ttsVoiceNameZh;
+    private string ttsLanguageCodeEn;
+    private string ttsVoiceNameEn;
 
-    public void StartSTT()
+    private string promptMs;
+    private string promptZh;
+    private string promptEn;
+
+    // ── Runtime state ─────────────────────────────────────────────────────
+    private AudioClip clip;
+    private bool recording = false;
+    private bool isProcessing = false;
+    private string detectedLanguage = "ms-MY";
+
+    public string statusMessage = "⏳ Puteri is speaking...";
+
+    // ── EmotionDetector (auto-attached) ───────────────────────────────────
+    private EmotionDetector emotionDetector;
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  Lightweight JSON field extractor
+    //  Replaces JsonUtility which silently drops fields containing
+    //  Unicode characters, long strings, or special prompt text.
+    // ─────────────────────────────────────────────────────────────────────
+    private string ExtractJsonField(string json, string fieldName)
     {
-        public string googleApiKey = "";
-        public string ollamaUrl = "";
-        public string ollamaModel = "";
+        // Matches: "fieldName": "value"  (handles escaped quotes inside value)
+        string pattern = "\"" + fieldName + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"";
+        Match m = Regex.Match(json, pattern);
+        if (!m.Success) return "";
 
-        public string ttsLanguageCodeMs = "";
-        public string ttsVoiceNameMs = "";
-        public string ttsLanguageCodeZh = "";
-        public string ttsVoiceNameZh = "";
-        public string ttsLanguageCodeEn = "";
-        public string ttsVoiceNameEn = "";
-
-        public string puteriPromptMs = "";
-        public string puteriPromptZh = "";
-        public string puteriPromptEn = "";
+        // Unescape standard JSON escape sequences
+        string val = m.Groups[1].Value;
+        val = val.Replace("\\n", "\n")
+                 .Replace("\\r", "\r")
+                 .Replace("\\t", "\t")
+                 .Replace("\\\"", "\"")
+                 .Replace("\\\\", "\\");
+        return val;
     }
 
-    [System.Serializable]
-    private class STTResponse
-    {
-        public Result[] results = null;
-
-        [System.Serializable]
-        public class Result
-        {
-            public Alternative[] alternatives = null;
-
-            [System.Serializable]
-            public class Alternative
-            {
-                public string transcript = "";
-            }
-        }
-    }
-
-    [System.Serializable]
-    private class OllamaRequest
-    {
-        public string model;
-        public string prompt;
-        public bool stream;
-    }
-
-    [System.Serializable]
-    private class OllamaResponse
-    {
-        public string response = "";
-    }
-
-    [System.Serializable]
-    private class TTSResponse
-    {
-        public string audioContent = "";
-    }
-
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
     //  Unity lifecycle
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
 
     void Start()
     {
         LoadConfig();
+
+        emotionDetector = gameObject.GetComponent<EmotionDetector>();
+        if (emotionDetector == null)
+            emotionDetector = gameObject.AddComponent<EmotionDetector>();
 
         foreach (string device in Microphone.devices)
             Debug.Log("Mic found: " + device);
@@ -92,13 +104,13 @@ public class VoicePipelinePuteri : MonoBehaviour
     {
         yield return new WaitForSeconds(2.5f);
 
-        while (characterVoice.isPlaying)
+        while (characterVoice != null && characterVoice.isPlaying)
             yield return null;
 
         yield return new WaitForSeconds(0.5f);
 
         ResetToIdle();
-        Debug.Log("Intro finished — ready for questions!");
+        Debug.Log("Puteri intro finished — ready for questions!");
     }
 
     void Update()
@@ -127,9 +139,9 @@ public class VoicePipelinePuteri : MonoBehaviour
         GUI.Label(new Rect(15, 15, 410, 50), statusMessage, style);
     }
 
-    // ─────────────────────────────────────────────
-    //  Config — reads shared config.json
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    //  Config loader — uses manual regex extraction instead of JsonUtility
+    // ─────────────────────────────────────────────────────────────────────
 
     void LoadConfig()
     {
@@ -142,35 +154,43 @@ public class VoicePipelinePuteri : MonoBehaviour
         }
 
         string json = File.ReadAllText(path, Encoding.UTF8);
-        ConfigData config = JsonUtility.FromJson<ConfigData>(json);
 
-        googleApiKey = config.googleApiKey;
-        ollamaUrl = config.ollamaUrl;
-        ollamaModel = config.ollamaModel;
+        // ── Core ──────────────────────────────────────────────────────────
+        googleApiKey = ExtractJsonField(json, "googleApiKey");
+        ollamaUrl = ExtractJsonField(json, "ollamaUrl");
+        ollamaModel = ExtractJsonField(json, "ollamaModel");
 
-        ttsLanguageCodeMs = config.ttsLanguageCodeMs;
-        ttsVoiceNameMs = config.ttsVoiceNameMs;
-        ttsLanguageCodeZh = config.ttsLanguageCodeZh;
-        ttsVoiceNameZh = config.ttsVoiceNameZh;
-        ttsLanguageCodeEn = config.ttsLanguageCodeEn;
-        ttsVoiceNameEn = config.ttsVoiceNameEn;
+        // ── Puteri TTS voices ─────────────────────────────────────────────
+        ttsLanguageCodeMs = ExtractJsonField(json, "puteriTtsLanguageCodeMs");
+        ttsVoiceNameMs = ExtractJsonField(json, "puteriTtsVoiceNameMs");
+        ttsLanguageCodeZh = ExtractJsonField(json, "puteriTtsLanguageCodeZh");
+        ttsVoiceNameZh = ExtractJsonField(json, "puteriTtsVoiceNameZh");
+        ttsLanguageCodeEn = ExtractJsonField(json, "puteriTtsLanguageCodeEn");
+        ttsVoiceNameEn = ExtractJsonField(json, "puteriTtsVoiceNameEn");
 
-        promptMs = config.puteriPromptMs;
-        promptEn = config.puteriPromptEn;
-        promptEn = config.puteriPromptZh;
+        // ── Puteri prompts ────────────────────────────────────────────────
+        promptMs = ExtractJsonField(json, "puteriPromptMs");
+        promptZh = ExtractJsonField(json, "puteriPromptZh");
+        promptEn = ExtractJsonField(json, "puteriPromptEn");
 
-        Debug.Log("Puteri: config.json loaded successfully.");
+        // ── Validation log ────────────────────────────────────────────────
+        Debug.Log("Puteri: config.json loaded.");
+        Debug.Log("  googleApiKey : " + (string.IsNullOrEmpty(googleApiKey) ? "MISSING ❌" : "OK ✓ (" + googleApiKey.Length + " chars)"));
+        Debug.Log("  ollamaUrl    : " + (string.IsNullOrEmpty(ollamaUrl) ? "MISSING ❌" : ollamaUrl));
+        Debug.Log("  ollamaModel  : " + (string.IsNullOrEmpty(ollamaModel) ? "MISSING ❌" : ollamaModel));
+        Debug.Log("  promptMs     : " + (string.IsNullOrEmpty(promptMs) ? "MISSING ❌" : "OK ✓ (" + promptMs.Length + " chars)"));
+        Debug.Log("  ttsVoiceMs   : " + (string.IsNullOrEmpty(ttsVoiceNameMs) ? "MISSING ❌" : ttsVoiceNameMs));
     }
 
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
     //  Step 1 — Record microphone
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
 
     void StartRecording()
     {
         recording = true;
         isProcessing = false;
-        detectedLanguage = "ms-MY"; // reset to Malay default for each new question
+        detectedLanguage = "ms-MY";
         statusMessage = "🎙️ Recording... (release SPACE to send)";
         clip = Microphone.Start(null, false, 5, 16000);
         Debug.Log("Recording...");
@@ -186,20 +206,46 @@ public class VoicePipelinePuteri : MonoBehaviour
         StartCoroutine(SendToSTT());
     }
 
+    public static byte[] AudioClipToWav(AudioClip clip)
+    {
+        float[] samples = new float[clip.samples];
+        clip.GetData(samples, 0);
+        byte[] bytes = new byte[samples.Length * 2];
+        int offset = 0;
+
+        foreach (float sample in samples)
+        {
+            float amplified = Mathf.Clamp(sample * 3f, -1f, 1f);
+            short value = (short)(amplified * short.MaxValue);
+            System.BitConverter.GetBytes(value).CopyTo(bytes, offset);
+            offset += 2;
+        }
+
+        return bytes;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  Step 2 — Google Speech-to-Text
+    // ─────────────────────────────────────────────────────────────────────
+
+    [System.Serializable] private class STTResponse { public Result[] results = null; [System.Serializable] public class Result { public Alternative[] alternatives = null; [System.Serializable] public class Alternative { public string transcript = ""; } } }
+    [System.Serializable] private class OllamaRequest { public string model; public string prompt; public bool stream; }
+    [System.Serializable] private class OllamaResponse { public string response = ""; }
+    [System.Serializable] private class TTSResponse { public string audioContent = ""; }
+
     IEnumerator SendToSTT()
     {
         if (string.IsNullOrEmpty(googleApiKey))
         {
-            Debug.LogError("Google API key is not loaded.");
+            Debug.LogError("Google API key is not loaded. Check config.json googleApiKey field.");
+            ResetToIdle();
             yield break;
         }
 
-        statusMessage = "Converting speech to text...";
-        Debug.Log("Sending to STT...");
-        
-        byte[] audioData = VoicePipeline.AudioClipToWav (clip);
-        string audioBase64 = System.Convert.ToBase64String(audioData);
+        statusMessage = "⏳ Converting speech to text...";
 
+        byte[] audioData = AudioClipToWav(clip);
+        string audioBase64 = System.Convert.ToBase64String(audioData);
         string url = "https://speech.googleapis.com/v1/speech:recognize?key=" + googleApiKey;
 
         string json = @"{
@@ -216,7 +262,6 @@ public class VoicePipelinePuteri : MonoBehaviour
 
         UnityWebRequest request = new UnityWebRequest(url, "POST");
         byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
-
         request.uploadHandler = new UploadHandlerRaw(bodyRaw);
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
@@ -226,60 +271,98 @@ public class VoicePipelinePuteri : MonoBehaviour
         if (request.result != UnityWebRequest.Result.Success)
         {
             Debug.LogError("STT Error: " + request.error);
-            statusMessage = "STT Failed";
+            Debug.LogError("STT Response: " + request.downloadHandler.text);
+            ResetToIdle();
+            yield break;
+        }
+
+        string responseText = request.downloadHandler.text;
+        STTResponse sttResponse = JsonUtility.FromJson<STTResponse>(responseText);
+
+        Debug.Log("STT Response: " + responseText);
+
+        if (sttResponse.results != null && sttResponse.results.Length > 0)
+        {
+            string transcript = sttResponse.results[0].alternatives[0].transcript;
+            detectedLanguage = DetectLanguage(transcript);
+
+            Debug.Log("Transcript: " + transcript);
+            Debug.Log("Detected language: " + detectedLanguage);
+
+            StartCoroutine(SendToOllama(transcript));
         }
         else
         {
-            Debug.Log("STT Response: " + request.downloadHandler.text);
-            statusMessage = "STT Completed";
+            Debug.LogWarning("No transcript found — speak louder or closer to mic.");
+            ResetToIdle();
         }
     }
 
-    // ===============================
-    // 🔊 AUDIO CONVERSION
-    // ===============================
+    // ─────────────────────────────────────────────────────────────────────
+    //  Language detection
+    // ─────────────────────────────────────────────────────────────────────
 
-    byte[] AudioClipToWav(AudioClip clip)
+    string DetectLanguage(string text)
     {
-        float[] samples = new float[clip.samples * clip.channels];
-        clip.GetData(samples, 0);
+        if (Regex.IsMatch(text, @"[\u4e00-\u9fff]"))
+            return "zh-CN";
 
-        return ConvertToWav(samples, clip.channels, clip.frequency);
+        string lower = text.ToLower();
+        string[] malayMarkers =
+        {
+        "apa", "siapa", "kenapa", "bagaimana", "di mana",
+        "awak", "kamu", "saya", "anda", "dengan", "untuk",
+        "tidak", "ada", "adalah", "ini", "itu", "yang",
+        "boleh", "mahu", "sudah", "belum", "bukan", "juga",
+        "cerita", "siapakah", "apakah", "mengapa", "kau",
+        "dia", "mereka", "kami", "kita", "punya", "sangat",
+        "encik", "cikgu", "tuan", "puan", "selamat", "terima",
+        "puteri", "gunung", "ledang", "raja", "hikayat"
+    };
+
+        int malayCount = 0;
+        foreach (string marker in malayMarkers)
+            if (lower.Contains(marker))
+                malayCount++;
+
+        if (malayCount >= 2)   // ← needs 2+ matches to be Malay
+            return "ms-MY";
+
+        return "en-US";
     }
 
-    byte[] ConvertToWav(float[] samples, int channels, int sampleRate)
+    // ─────────────────────────────────────────────────────────────────────
+    //  Step 3 — Ollama local LLM
+    // ─────────────────────────────────────────────────────────────────────
+
+    IEnumerator SendToOllama(string userText)
     {
-        byte[] pcmData = new byte[samples.Length * 2];
-
-        int index = 0;
-        foreach (float sample in samples)
+        if (string.IsNullOrEmpty(ollamaUrl))
         {
-            short intSample = (short)(sample * short.MaxValue);
-            byte[] bytes = System.BitConverter.GetBytes(intSample);
-
-            pcmData[index++] = bytes[0];
-            pcmData[index++] = bytes[1];
+            Debug.LogError("Ollama URL is not loaded. Check config.json ollamaUrl field.");
+            ResetToIdle();
+            yield break;
         }
 
         statusMessage = "🤖 Puteri is thinking...";
-        Debug.Log("Sending to Ollama...");
 
-        string characterPrompt =
+        string prompt =
             detectedLanguage == "ms-MY" ? promptMs :
             detectedLanguage == "zh-CN" ? promptZh :
             promptEn;
 
+        if (string.IsNullOrEmpty(prompt))
+            Debug.LogWarning("Prompt is empty for language: " + detectedLanguage);
+
         var ollamaRequest = new OllamaRequest
         {
-            // We add "User: " and "Puteri: " to tell the AI it's a dialogue
             model = ollamaModel,
-            prompt = characterPrompt + "\n\nUser: " + text + "\nPuteri:",
+            prompt = prompt + "\n\nUser: " + userText + "\nPuteri:",
             stream = false
         };
 
         string url = ollamaUrl + "/api/generate";
         string json = JsonUtility.ToJson(ollamaRequest);
-        Debug.Log("Ollama JSON: " + json);
 
         UnityWebRequest request = new UnityWebRequest(url, "POST");
         byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
@@ -291,7 +374,7 @@ public class VoicePipelinePuteri : MonoBehaviour
 
         if (request.result != UnityWebRequest.Result.Success)
         {
-            Debug.LogError("Ollama Error: " + request.error);
+            Debug.LogError("Ollama Error: " + request.error + " — is Ollama running? Run: ollama serve");
             ResetToIdle();
             yield break;
         }
@@ -306,42 +389,55 @@ public class VoicePipelinePuteri : MonoBehaviour
 
         Debug.Log("Ollama reply: " + replyText);
 
-        // Adding the emotion detection based on keywords in the reply
-        string detectedEmotion = "Normal"; // Default
-        string lowerReply = replyText.ToLower();
-
-        if (lowerReply.Contains("sedih") || lowerReply.Contains("sad") || lowerReply.Contains("kecewa"))
-        {
-            detectedEmotion = "Sad";
-        }
-        else if (lowerReply.Contains("marah") || lowerReply.Contains("angry") || lowerReply.Contains("benci"))
-        {
-            detectedEmotion = "Angry";
-        }
-
-        // Tell the bridge to change the environment!
-        if (bridge != null)
-        {
-            bridge.OnAIResponseReceived(detectedEmotion);
-        }
-        StartCoroutine(SendToTTS(replyText));
+        StartCoroutine(DetectEmotionThenSpeak(replyText));
     }
 
-    // ─────────────────────────────────────────────
-    //  Step 4 — Google Text-to-Speech
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    //  Step 4 — Emotion detection
+    // ─────────────────────────────────────────────────────────────────────
+
+    IEnumerator DetectEmotionThenSpeak(string replyText)
+    {
+        statusMessage = "🎭 Reading emotion...";
+
+        // ── Truncate to first 200 chars to avoid Ollama 400 error ──
+        string shortText = replyText.Length > 200
+            ? replyText.Substring(0, 200)
+            : replyText;
+
+        string dominantEmotion = "neutral";
+
+        yield return StartCoroutine(
+            emotionDetector.DetectEmotion(
+                shortText,        // ← use shortText instead of replyText
+                ollamaUrl,
+                ollamaModel,
+                result => dominantEmotion = result
+            )
+        );
+
+        Debug.Log("Emotion detected: " + dominantEmotion);
+
+        if (bridge != null)
+            bridge.OnAIResponseReceived(dominantEmotion);
+
+        StartCoroutine(SendToTTS(replyText));  // ← still speak full reply
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  Step 5 — Google Text-to-Speech
+    // ─────────────────────────────────────────────────────────────────────
 
     IEnumerator SendToTTS(string text)
     {
         if (string.IsNullOrEmpty(googleApiKey))
         {
-            Debug.LogError("Google API key not loaded.");
+            Debug.LogError("Google API key not loaded. Check config.json googleApiKey field.");
             ResetToIdle();
             yield break;
         }
 
         statusMessage = "🔊 Generating voice...";
-        Debug.Log("Sending to TTS...");
 
         string voiceLanguage =
             detectedLanguage == "ms-MY" ? ttsLanguageCodeMs :
@@ -366,10 +462,7 @@ public class VoicePipelinePuteri : MonoBehaviour
             + "\"audioConfig\":{ \"audioEncoding\":\"MP3\" }"
         + "}";
 
-        Debug.Log("TTS JSON: " + json);
-
         string url = "https://texttospeech.googleapis.com/v1/text:synthesize?key=" + googleApiKey;
-
         UnityWebRequest request = new UnityWebRequest(url, "POST");
         byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
         request.uploadHandler = new UploadHandlerRaw(bodyRaw);
@@ -392,9 +485,9 @@ public class VoicePipelinePuteri : MonoBehaviour
         StartCoroutine(PlayMp3(mp3Data));
     }
 
-    // ─────────────────────────────────────────────
-    //  Step 5 — Play voice on NPC
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    //  Step 6 — Play voice on NPC
+    // ─────────────────────────────────────────────────────────────────────
 
     IEnumerator PlayMp3(byte[] mp3Data)
     {
@@ -403,7 +496,8 @@ public class VoicePipelinePuteri : MonoBehaviour
         string tempPath = Application.temporaryCachePath + "/puteri_voice.mp3";
         File.WriteAllBytes(tempPath, mp3Data);
 
-        using (UnityWebRequest audioRequest = UnityWebRequestMultimedia.GetAudioClip("file://" + tempPath, AudioType.MPEG))
+        using (UnityWebRequest audioRequest = UnityWebRequestMultimedia.GetAudioClip(
+                   "file://" + tempPath, AudioType.MPEG))
         {
             yield return audioRequest.SendWebRequest();
 
@@ -427,15 +521,15 @@ public class VoicePipelinePuteri : MonoBehaviour
             if (characterAnimator != null)
                 characterAnimator.SetBool("IsTalking", false);
             else
-                Debug.LogError("characterAnimator is NULL — not assigned!");
+                Debug.LogError("characterAnimator is NULL — assign it in the Inspector!");
 
             ResetToIdle();
         }
     }
 
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
     //  Helper
-    // ─────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
 
     void ResetToIdle()
     {

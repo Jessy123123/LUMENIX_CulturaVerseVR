@@ -1,40 +1,36 @@
 ﻿using UnityEngine;
 
-public class AIBridgePuteri : MonoBehaviour
+public class AIBridgeYueFei : MonoBehaviour
 {
     [Header("Environment Manager")]
-    public EnvironmentManagerPuteri envManager;
+    public EnvironmentManagerYueFei envManager;
 
     // ─────────────────────────────────────────────
-    //  Called by VoicePipelinePuteri after emotion
-    //  detection. Accepts both formats:
-    //    EmotionDetector → "joy", "sadness", "anger",
-    //                      "fear", "surprise", "disgust", "neutral"
-    //    Manual test keys → "Sad", "Angry", "Normal"
+    //  Called by VoicePipeline after emotion
+    //  detection. Accepts EmotionDetector labels:
+    //  "joy","sadness","anger","fear","surprise",
+    //  "disgust","neutral"
     // ─────────────────────────────────────────────
     public void OnAIResponseReceived(string emotion)
     {
         string normalized = NormalizeEmotion(emotion);
 
-        Debug.Log("AIBridgePuteri: emotion = " + emotion + " → " + normalized);
+        Debug.Log("AIBridgeYueFei: " + emotion + " → " + normalized);
 
         if (envManager != null)
             envManager.UpdateEnvironment(normalized);
         else
-            Debug.LogError("AIBridgePuteri: EnvironmentManagerPuteri slot is EMPTY!");
+            Debug.LogError("AIBridgeYueFei: envManager slot is EMPTY in Inspector!");
     }
 
     // ─────────────────────────────────────────────
-    //  Maps all emotion labels to the 4 states
-    //  your EnvironmentManagerPuteri understands:
-    //    Normal | Sad | Angry | Fearful
+    //  Maps emotion labels → environment states
     // ─────────────────────────────────────────────
     private string NormalizeEmotion(string raw)
     {
         switch (raw.ToLower().Trim())
         {
             case "joy":
-            case "surprise":
             case "normal":
             case "neutral":
                 return "Normal";
@@ -50,7 +46,8 @@ public class AIBridgePuteri : MonoBehaviour
 
             case "fear":
             case "fearful":
-                return "Fearful";
+            case "surprise":
+                return "Spiritual";
 
             default:
                 return "Normal";
@@ -58,13 +55,14 @@ public class AIBridgePuteri : MonoBehaviour
     }
 
     // ─────────────────────────────────────────────
-    //  Manual test keys (Editor / demo use only)
+    //  Manual test keys (Play mode only)
+    //  G = Sad   A = Angry   S = Spiritual   N = Normal
     // ─────────────────────────────────────────────
     void Update()
     {
-        if (Input.GetKeyDown(KeyCode.G)) OnAIResponseReceived("sadness");   // Gloomy
-        if (Input.GetKeyDown(KeyCode.A)) OnAIResponseReceived("anger");     // Angry
-        if (Input.GetKeyDown(KeyCode.F)) OnAIResponseReceived("fear");      // Fearful
-        if (Input.GetKeyDown(KeyCode.N)) OnAIResponseReceived("neutral");   // Normal
+        if (Input.GetKeyDown(KeyCode.G)) OnAIResponseReceived("sadness");
+        if (Input.GetKeyDown(KeyCode.A)) OnAIResponseReceived("anger");
+        if (Input.GetKeyDown(KeyCode.S)) OnAIResponseReceived("surprise");
+        if (Input.GetKeyDown(KeyCode.N)) OnAIResponseReceived("neutral");
     }
 }
