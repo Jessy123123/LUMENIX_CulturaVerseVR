@@ -197,6 +197,12 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 40a0557b05c76144b8c6cce5bbf44868, type: 3}
       insertIndex: -1
       addedObject: {fileID: 867425526}
+    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 40a0557b05c76144b8c6cce5bbf44868, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 867425530}
+    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 40a0557b05c76144b8c6cce5bbf44868, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 867425531}
   m_SourcePrefab: {fileID: 100100000, guid: 40a0557b05c76144b8c6cce5bbf44868, type: 3}
 --- !u!1 &297988559
 GameObject:
@@ -560,7 +566,7 @@ AudioSource:
   OutputAudioMixerGroup: {fileID: 0}
   m_audioClip: {fileID: 0}
   m_Resource: {fileID: 0}
-  m_PlayOnAwake: 1
+  m_PlayOnAwake: 0
   m_Volume: 1
   m_Pitch: 1
   Loop: 0
@@ -660,11 +666,39 @@ MonoBehaviour:
   bridge: {fileID: 1887924547}
   characterVoice: {fileID: 867425523}
   characterAnimator: {fileID: 867425528}
+  statusMessage: "\u23F3 Puteri is speaking..."
 --- !u!95 &867425528 stripped
 Animator:
   m_CorrespondingSourceObject: {fileID: 5866666021909216657, guid: 40a0557b05c76144b8c6cce5bbf44868, type: 3}
   m_PrefabInstance: {fileID: 118833957}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &867425530
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 867425519}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c66bc26f118334c4a8e3ae7c7dfb8ff6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::VoiceRecorderPuteri
+  animator: {fileID: 867425528}
+  audioSource: {fileID: 867425523}
+  voiceClip: {fileID: 8300000, guid: 142bc5727ca3e0a4fa22710a104aec53, type: 3}
+--- !u!114 &867425531
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 867425519}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ec01ddf7b98ac0946b1549afa97aeb34, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::EmotionDetector
 --- !u!1 &1287998308
 GameObject:
   m_ObjectHideFlags: 0
