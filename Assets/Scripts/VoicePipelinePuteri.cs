@@ -3,15 +3,186 @@ using System.Collections;
 using System.Text;
 using UnityEngine.Networking;
 
+
 public class VoicePipelinePuteri : MonoBehaviour
 {
-    public string googleApiKey;
-    public AudioClip clip;
+    [Header("Environment Bridge")]
+    public AIBridgePuteri bridge; 
+
+    // ── Fields loaded from shared config.json ──
+    private string googleApiKey;
+    private string ollamaUrl;
+    private string ollamaModel;
 
     public string statusMessage = "";
 
     public void StartSTT()
     {
+        public string googleApiKey = "";
+        public string ollamaUrl = "";
+        public string ollamaModel = "";
+
+        public string ttsLanguageCodeMs = "";
+        public string ttsVoiceNameMs = "";
+        public string ttsLanguageCodeZh = "";
+        public string ttsVoiceNameZh = "";
+        public string ttsLanguageCodeEn = "";
+        public string ttsVoiceNameEn = "";
+
+        public string puteriPromptMs = "";
+        public string puteriPromptZh = "";
+        public string puteriPromptEn = "";
+    }
+
+    [System.Serializable]
+    private class STTResponse
+    {
+        public Result[] results = null;
+
+        [System.Serializable]
+        public class Result
+        {
+            public Alternative[] alternatives = null;
+
+            [System.Serializable]
+            public class Alternative
+            {
+                public string transcript = "";
+            }
+        }
+    }
+
+    [System.Serializable]
+    private class OllamaRequest
+    {
+        public string model;
+        public string prompt;
+        public bool stream;
+    }
+
+    [System.Serializable]
+    private class OllamaResponse
+    {
+        public string response = "";
+    }
+
+    [System.Serializable]
+    private class TTSResponse
+    {
+        public string audioContent = "";
+    }
+
+    // ─────────────────────────────────────────────
+    //  Unity lifecycle
+    // ─────────────────────────────────────────────
+
+    void Start()
+    {
+        LoadConfig();
+
+        foreach (string device in Microphone.devices)
+            Debug.Log("Mic found: " + device);
+
+        isProcessing = true;
+        statusMessage = "⏳ Puteri is speaking...";
+        StartCoroutine(WaitForIntro());
+    }
+
+    IEnumerator WaitForIntro()
+    {
+        yield return new WaitForSeconds(2.5f);
+
+        while (characterVoice.isPlaying)
+            yield return null;
+
+        yield return new WaitForSeconds(0.5f);
+
+        ResetToIdle();
+        Debug.Log("Intro finished — ready for questions!");
+    }
+
+    void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.Space) && !isProcessing)
+            StartRecording();
+
+        if (Input.GetKeyUp(KeyCode.Space) && recording)
+            StopRecording();
+    }
+
+    void OnGUI()
+    {
+        GUI.color = new Color(0, 0, 0, 0.7f);
+        GUI.Box(new Rect(10, 10, 420, 60), "");
+
+        if (recording) GUI.color = Color.red;
+        else if (isProcessing) GUI.color = Color.yellow;
+        else GUI.color = Color.green;
+
+        GUIStyle style = new GUIStyle();
+        style.fontSize = 20;
+        style.normal.textColor = GUI.color;
+        style.padding = new RectOffset(10, 10, 10, 10);
+
+        GUI.Label(new Rect(15, 15, 410, 50), statusMessage, style);
+    }
+
+    // ─────────────────────────────────────────────
+    //  Config — reads shared config.json
+    // ─────────────────────────────────────────────
+
+    void LoadConfig()
+    {
+        string path = Application.streamingAssetsPath + "/config.json";
+
+        if (!File.Exists(path))
+        {
+            Debug.LogError("config.json not found at: " + path);
+            return;
+        }
+
+        string json = File.ReadAllText(path, Encoding.UTF8);
+        ConfigData config = JsonUtility.FromJson<ConfigData>(json);
+
+        googleApiKey = config.googleApiKey;
+        ollamaUrl = config.ollamaUrl;
+        ollamaModel = config.ollamaModel;
+
+        ttsLanguageCodeMs = config.ttsLanguageCodeMs;
+        ttsVoiceNameMs = config.ttsVoiceNameMs;
+        ttsLanguageCodeZh = config.ttsLanguageCodeZh;
+        ttsVoiceNameZh = config.ttsVoiceNameZh;
+        ttsLanguageCodeEn = config.ttsLanguageCodeEn;
+        ttsVoiceNameEn = config.ttsVoiceNameEn;
+
+        promptMs = config.puteriPromptMs;
+        promptEn = config.puteriPromptEn;
+        promptEn = config.puteriPromptZh;
+
+        Debug.Log("Puteri: config.json loaded successfully.");
+    }
+
+    // ─────────────────────────────────────────────
+    //  Step 1 — Record microphone
+    // ─────────────────────────────────────────────
+
+    void StartRecording()
+    {
+        recording = true;
+        isProcessing = false;
+        detectedLanguage = "ms-MY"; // reset to Malay default for each new question
+        statusMessage = "🎙️ Recording... (release SPACE to send)";
+        clip = Microphone.Start(null, false, 5, 16000);
+        Debug.Log("Recording...");
+    }
+
+    void StopRecording()
+    {
+        recording = false;
+        isProcessing = true;
+        statusMessage = "⏳ Processing...";
+        Microphone.End(null);
+        Debug.Log("Recording stopped");
         StartCoroutine(SendToSTT());
     }
 
@@ -25,8 +196,8 @@ public class VoicePipelinePuteri : MonoBehaviour
 
         statusMessage = "Converting speech to text...";
         Debug.Log("Sending to STT...");
-
-        byte[] audioData = AudioClipToWav(clip);
+        
+        byte[] audioData = VoicePipeline.AudioClipToWav (clip);
         string audioBase64 = System.Convert.ToBase64String(audioData);
 
         string url = "https://speech.googleapis.com/v1/speech:recognize?key=" + googleApiKey;
@@ -90,6 +261,185 @@ public class VoicePipelinePuteri : MonoBehaviour
             pcmData[index++] = bytes[1];
         }
 
-        return pcmData;
+        statusMessage = "🤖 Puteri is thinking...";
+        Debug.Log("Sending to Ollama...");
+
+        string characterPrompt =
+            detectedLanguage == "ms-MY" ? promptMs :
+            detectedLanguage == "zh-CN" ? promptZh :
+            promptEn;
+
+        var ollamaRequest = new OllamaRequest
+        {
+            // We add "User: " and "Puteri: " to tell the AI it's a dialogue
+            model = ollamaModel,
+            prompt = characterPrompt + "\n\nUser: " + text + "\nPuteri:",
+            stream = false
+        };
+
+        string url = ollamaUrl + "/api/generate";
+        string json = JsonUtility.ToJson(ollamaRequest);
+        Debug.Log("Ollama JSON: " + json);
+
+        UnityWebRequest request = new UnityWebRequest(url, "POST");
+        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+
+        yield return request.SendWebRequest();
+
+        if (request.result != UnityWebRequest.Result.Success)
+        {
+            Debug.LogError("Ollama Error: " + request.error);
+            ResetToIdle();
+            yield break;
+        }
+
+        OllamaResponse ollamaResponse = JsonUtility.FromJson<OllamaResponse>(request.downloadHandler.text);
+        string replyText = ollamaResponse.response
+            .Replace("\n", " ")
+            .Replace("\r", " ")
+            .Replace("\"", "'")
+            .Replace("\\", " ")
+            .Trim();
+
+        Debug.Log("Ollama reply: " + replyText);
+
+        // Adding the emotion detection based on keywords in the reply
+        string detectedEmotion = "Normal"; // Default
+        string lowerReply = replyText.ToLower();
+
+        if (lowerReply.Contains("sedih") || lowerReply.Contains("sad") || lowerReply.Contains("kecewa"))
+        {
+            detectedEmotion = "Sad";
+        }
+        else if (lowerReply.Contains("marah") || lowerReply.Contains("angry") || lowerReply.Contains("benci"))
+        {
+            detectedEmotion = "Angry";
+        }
+
+        // Tell the bridge to change the environment!
+        if (bridge != null)
+        {
+            bridge.OnAIResponseReceived(detectedEmotion);
+        }
+        StartCoroutine(SendToTTS(replyText));
+    }
+
+    // ─────────────────────────────────────────────
+    //  Step 4 — Google Text-to-Speech
+    // ─────────────────────────────────────────────
+
+    IEnumerator SendToTTS(string text)
+    {
+        if (string.IsNullOrEmpty(googleApiKey))
+        {
+            Debug.LogError("Google API key not loaded.");
+            ResetToIdle();
+            yield break;
+        }
+
+        statusMessage = "🔊 Generating voice...";
+        Debug.Log("Sending to TTS...");
+
+        string voiceLanguage =
+            detectedLanguage == "ms-MY" ? ttsLanguageCodeMs :
+            detectedLanguage == "zh-CN" ? ttsLanguageCodeZh :
+            ttsLanguageCodeEn;
+
+        string voiceName =
+            detectedLanguage == "ms-MY" ? ttsVoiceNameMs :
+            detectedLanguage == "zh-CN" ? ttsVoiceNameZh :
+            ttsVoiceNameEn;
+
+        string safeText = text.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        string ssmlText = "<speak><prosody rate='slow' pitch='+2st'>" + safeText + "</prosody></speak>";
+
+        string json = "{"
+            + "\"input\":{ \"ssml\":\"" + ssmlText + "\" },"
+            + "\"voice\":{"
+                + "\"languageCode\":\"" + voiceLanguage + "\","
+                + "\"name\":\"" + voiceName + "\","
+                + "\"ssmlGender\":\"FEMALE\""
+            + "},"
+            + "\"audioConfig\":{ \"audioEncoding\":\"MP3\" }"
+        + "}";
+
+        Debug.Log("TTS JSON: " + json);
+
+        string url = "https://texttospeech.googleapis.com/v1/text:synthesize?key=" + googleApiKey;
+
+        UnityWebRequest request = new UnityWebRequest(url, "POST");
+        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+
+        yield return request.SendWebRequest();
+
+        if (request.result != UnityWebRequest.Result.Success)
+        {
+            Debug.LogError("TTS Error: " + request.error);
+            Debug.LogError("TTS Response: " + request.downloadHandler.text);
+            ResetToIdle();
+            yield break;
+        }
+
+        TTSResponse ttsResponse = JsonUtility.FromJson<TTSResponse>(request.downloadHandler.text);
+        byte[] mp3Data = System.Convert.FromBase64String(ttsResponse.audioContent);
+
+        StartCoroutine(PlayMp3(mp3Data));
+    }
+
+    // ─────────────────────────────────────────────
+    //  Step 5 — Play voice on NPC
+    // ─────────────────────────────────────────────
+
+    IEnumerator PlayMp3(byte[] mp3Data)
+    {
+        statusMessage = "💬 Puteri is speaking...";
+
+        string tempPath = Application.temporaryCachePath + "/puteri_voice.mp3";
+        File.WriteAllBytes(tempPath, mp3Data);
+
+        using (UnityWebRequest audioRequest = UnityWebRequestMultimedia.GetAudioClip("file://" + tempPath, AudioType.MPEG))
+        {
+            yield return audioRequest.SendWebRequest();
+
+            if (audioRequest.result != UnityWebRequest.Result.Success)
+            {
+                Debug.LogError("Audio load error: " + audioRequest.error);
+                ResetToIdle();
+                yield break;
+            }
+
+            AudioClip ttsClip = DownloadHandlerAudioClip.GetContent(audioRequest);
+            characterVoice.clip = ttsClip;
+            characterVoice.Play();
+
+            if (characterAnimator != null)
+                characterAnimator.SetBool("IsTalking", true);
+
+            Debug.Log("Puteri is speaking...");
+            yield return new WaitForSeconds(ttsClip.length);
+
+            if (characterAnimator != null)
+                characterAnimator.SetBool("IsTalking", false);
+            else
+                Debug.LogError("characterAnimator is NULL — not assigned!");
+
+            ResetToIdle();
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    //  Helper
+    // ─────────────────────────────────────────────
+
+    void ResetToIdle()
+    {
+        isProcessing = false;
+        statusMessage = "Press and Hold SPACE to talk";
     }
 }
