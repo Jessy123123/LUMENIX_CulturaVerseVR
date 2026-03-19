@@ -1,72 +1,72 @@
-using UnityEngine;
+﻿using UnityEngine;
 
-public class AI_bridge_YueFei : MonoBehaviour
-
+public class AI_bridge_YueFei : MonoBehaviour 
 {
-
-    // Link your existing EnvironmentManager script here in the Inspector
-
+    [Header("Environment Manager")]
     public EnvironmentManager_YueFei envManager;
 
-    // Call this method whenever the AI generates a response
-
+    // ─────────────────────────────────────────────
+    //  Called by VoicePipeline after emotion
+    //  detection. Accepts EmotionDetector labels:
+    //  "joy","sadness","anger","fear","surprise",
+    //  "disgust","neutral"
+    // ─────────────────────────────────────────────
     public void OnAIResponseReceived(string emotion)
-
     {
+        string normalized = NormalizeEmotion(emotion);
+
+        Debug.Log("AIBridgeYueFei: " + emotion + " → " + normalized);
 
         if (envManager != null)
-
-        {
-
-            envManager.UpdateEnvironment(emotion);
-
-        }
-
+            envManager.UpdateEnvironment(normalized);
         else
-
-        {
-
-            Debug.LogError("EnvManager slot is EMPTY on the Bridge!");
-
-        }
-
+            Debug.LogError("AIBridgeYueFei: envManager slot is EMPTY in Inspector!");
     }
 
-    void Update() //To manually test the trigger only
-
+    // ─────────────────────────────────────────────
+    //  Maps emotion labels → environment states
+    //    Normal    — Golden dawn, calm battlefield
+    //    Sad       — Grey rain, mourning
+    //    Angry     — Red sky, fire and smoke
+    //    Spiritual — Ethereal glow, petals
+    // ─────────────────────────────────────────────
+    private string NormalizeEmotion(string raw)
     {
-
-        // Press G to test Gloomy/Rain
-
-        if (Input.GetKeyDown(KeyCode.G))
-
+        switch (raw.ToLower().Trim())
         {
+            case "joy":
+            case "normal":
+            case "neutral":
+                return "Normal";
 
-            OnAIResponseReceived("Sad");
+            case "sadness":
+            case "sad":
+            case "disgust":
+                return "Sad";
 
+            case "anger":
+            case "angry":
+                return "Angry";
+
+            case "fear":
+            case "fearful":
+            case "surprise":
+                return "Spiritual";
+
+            default:
+                return "Normal";
         }
-
-        // Press A to test Angry/Lightning
-
-        if (Input.GetKeyDown(KeyCode.A))
-
-        {
-
-            OnAIResponseReceived("Angry");
-
-        }
-
-        // Press N to return to Normal
-
-        if (Input.GetKeyDown(KeyCode.N))
-
-        {
-
-            OnAIResponseReceived("Normal");
-
-        }
-
     }
 
+    // ─────────────────────────────────────────────
+    //  Manual test keys (Play mode only)
+    //  G = Sad   A = Angry   S = Spiritual   N = Normal
+    // ─────────────────────────────────────────────
+    void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.G)) OnAIResponseReceived("sadness");
+        if (Input.GetKeyDown(KeyCode.A)) OnAIResponseReceived("anger");
+        if (Input.GetKeyDown(KeyCode.S)) OnAIResponseReceived("surprise");
+        if (Input.GetKeyDown(KeyCode.N)) OnAIResponseReceived("neutral");
+    }
 }
-

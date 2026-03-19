@@ -597,7 +597,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8d4a365ab6c6aac428056af4c8a771fb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::VoicePipeline
-  bridge: {fileID: 0}
+  bridge: {fileID: 1832554109}
   characterVoice: {fileID: 1164634457}
   characterAnimator: {fileID: 1164634455}
 --- !u!1 &425503161
@@ -1546,9 +1546,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 8d4a365ab6c6aac428056af4c8a771fb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::VoicePipeline
-  bridge: {fileID: 0}
-  characterVoice: {fileID: 0}
-  characterAnimator: {fileID: 0}
+  bridge: {fileID: 1832554109}
+  characterVoice: {fileID: 1164634457}
+  characterAnimator: {fileID: 1164634455}
 --- !u!1 &1180917215
 GameObject:
   m_ObjectHideFlags: 0
@@ -6567,8 +6567,8 @@ MonoBehaviour:
       m_Calls: []
   m_text: "\u6012\u53D1\u51B2\u51A0\uFF0C\n\u51ED\u9611\u5904\u3001\n\u6F47\u6F47\u96E8\u6B47\u3002\n\n\u62AC\u671B\u773C\uFF0C\n\u4EF0\u5929\u957F\u5578\uFF0C\n\u58EE\u6000\u6FC0\u70C8\u3002\n\n\u4E09\u5341\u529F\u540D\u5C18\u4E0E\u571F\uFF0C\n\u516B\u5343\u91CC\u8DEF\u4E91\u548C\u6708\u3002\n\u83AB\u7B49\u95F2\uFF0C\n\u767D\u4E86\u5C11\u5E74\u5934\uFF0C\n\u7A7A\u60B2\u5207\u3002"
   m_isRightToLeft: 0
-  m_fontAsset: {fileID: 11400000, guid: 2f41c5958f8717f48a4ab9e3b99edf89, type: 2}
-  m_sharedMaterial: {fileID: 8745834291961116972, guid: 2f41c5958f8717f48a4ab9e3b99edf89, type: 2}
+  m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
+  m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
@@ -6665,7 +6665,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 8745834291961116972, guid: 2f41c5958f8717f48a4ab9e3b99edf89, type: 2}
+  - {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -6751,6 +6751,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1832554108}
   - component: {fileID: 1832554107}
+  - component: {fileID: 1832554109}
   m_Layer: 0
   m_Name: 'EnvironmentManager '
   m_TagString: Untagged
@@ -6776,7 +6777,7 @@ MonoBehaviour:
   rainParticles: {fileID: 1180917218}
   angrySkybox: {fileID: 2100000, guid: 7b0cd86e8d3edf742a983200b56b8d9e, type: 2}
   normalSkybox: {fileID: 10304, guid: 0000000000000000f000000000000000, type: 0}
-  lightningLight: {fileID: 0}
+  lightningLight: {fileID: 67218059}
 --- !u!4 &1832554108
 Transform:
   m_ObjectHideFlags: 0
@@ -6792,6 +6793,19 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1832554109
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1832554106}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5864794875bb19e4296c44ef78a77dd9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::AI_bridge_YueFei
+  envManager: {fileID: 1832554107}
 --- !u!1001 &2020229643
 PrefabInstance:
   m_ObjectHideFlags: 0
