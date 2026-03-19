@@ -407,38 +407,40 @@ public class VoicePipeline : MonoBehaviour
             .Trim();
 
         Debug.Log("Ollama reply: " + replyText);
+        // Adding the emotion detection based on keywords in the reply
 
-        // Detect emotion locally then speak
-        StartCoroutine(DetectEmotionThenSpeak(replyText));
-    }
+        string detectedEmotion = "Normal"; // Default
 
-    // ─────────────────────────────────────────────────────────────────────
-    //  Step 4 — Emotion detection via local Ollama (zero cost)
-    //  Drives AIBridgeGunung environment changes.
-    // ─────────────────────────────────────────────────────────────────────
+        string lowerReply = replyText.ToLower();
+        
+        if (lowerReply.Contains("sedih") || lowerReply.Contains("sad") || lowerReply.Contains("kecewa"))
 
-    IEnumerator DetectEmotionThenSpeak(string replyText)
-    {
-        statusMessage = "🎭 Reading emotion...";
+        {
 
-        string dominantEmotion = "neutral";
+            detectedEmotion = "Sad";
 
-        yield return StartCoroutine(
-            emotionDetector.DetectEmotion(
-                replyText,
-                ollamaUrl,
-                ollamaModel,
-                result => dominantEmotion = result
-            )
-        );
+        }
 
-        Debug.Log("Emotion detected: " + dominantEmotion);
+        else if (lowerReply.Contains("marah") || lowerReply.Contains("angry") || lowerReply.Contains("benci"))
 
-        // Tell the bridge — changes battlefield environment based on emotion
+        {
+
+            detectedEmotion = "Angry";
+
+        }
+        
+        // Tell the bridge to change the environment!
+
         if (bridge != null)
-            bridge.OnAIResponseReceived(dominantEmotion);
 
+        {
+
+            bridge.OnAIResponseReceived(detectedEmotion);
+
+        }
+ 
         StartCoroutine(SendToTTS(replyText));
+        
     }
 
     // ─────────────────────────────────────────────────────────────────────
