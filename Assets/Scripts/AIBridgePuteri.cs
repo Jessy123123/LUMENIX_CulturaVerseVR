@@ -25,9 +25,10 @@ public class AIBridgePuteri : MonoBehaviour
     }
 
     // ─────────────────────────────────────────────
-    //  Maps all emotion labels to the 4 states
+    //  Maps all emotion labels to the 3 states
     //  your EnvironmentManagerPuteri understands:
-    //    Normal | Sad | Angry | Fearful
+    //    Normal | Sad | Angry
+    //  Note: Fearful → Sad (reuses GloomyEnvironment)
     // ─────────────────────────────────────────────
     private string NormalizeEmotion(string raw)
     {
@@ -42,15 +43,13 @@ public class AIBridgePuteri : MonoBehaviour
             case "sadness":
             case "sad":
             case "disgust":
+            case "fear":        // reuses GloomyEnvironment
+            case "fearful":     // reuses GloomyEnvironment
                 return "Sad";
 
             case "anger":
             case "angry":
                 return "Angry";
-
-            case "fear":
-            case "fearful":
-                return "Fearful";
 
             default:
                 return "Normal";
@@ -59,12 +58,12 @@ public class AIBridgePuteri : MonoBehaviour
 
     // ─────────────────────────────────────────────
     //  Manual test keys (Editor / demo use only)
+    //  G = Gloomy/Sad, A = Angry, N = Normal
     // ─────────────────────────────────────────────
     void Update()
     {
         if (Input.GetKeyDown(KeyCode.G)) OnAIResponseReceived("sadness");   // Gloomy
         if (Input.GetKeyDown(KeyCode.A)) OnAIResponseReceived("anger");     // Angry
-        if (Input.GetKeyDown(KeyCode.F)) OnAIResponseReceived("fear");      // Fearful
         if (Input.GetKeyDown(KeyCode.N)) OnAIResponseReceived("neutral");   // Normal
     }
 }

@@ -13,13 +13,14 @@ using UnityEngine.Networking;
 ///               →  Google STT  (primary: ms-MY, fallback: zh-CN, en-US)
 ///               →  DetectLanguage()
 ///               →  Ollama LLM  (character reply)
-///               →  EmotionDetector  (Ollama second call — zero cost, local)
+///               →  EmotionDetector  (HuggingFace API — zero RAM, free tier)
 ///               →  AIBridgePuteri.OnAIResponseReceived(emotion)
 ///               →  Google TTS  (female voice, +2st pitch)
 ///               →  AudioSource playback + Animator IsTalking
 ///
 /// FIX: Uses manual JSON parsing instead of JsonUtility to handle
 ///      Unicode characters and long prompt strings in config.json.
+/// FIX: EmotionDetector now uses HuggingFace instead of Ollama.
 /// </summary>
 public class VoicePipelinePuteri : MonoBehaviour
 {
@@ -33,6 +34,7 @@ public class VoicePipelinePuteri : MonoBehaviour
 
     // ── Config (loaded from StreamingAssets/config.json) ──────────────────
     private string googleApiKey;
+    private string huggingFaceApiKey;
     private string ollamaUrl;
     private string ollamaModel;
 
@@ -157,6 +159,7 @@ public class VoicePipelinePuteri : MonoBehaviour
 
         // ── Core ──────────────────────────────────────────────────────────
         googleApiKey = ExtractJsonField(json, "googleApiKey");
+        huggingFaceApiKey = ExtractJsonField(json, "huggingFaceApiKey");
         ollamaUrl = ExtractJsonField(json, "ollamaUrl");
         ollamaModel = ExtractJsonField(json, "ollamaModel");
 
@@ -175,11 +178,12 @@ public class VoicePipelinePuteri : MonoBehaviour
 
         // ── Validation log ────────────────────────────────────────────────
         Debug.Log("Puteri: config.json loaded.");
-        Debug.Log("  googleApiKey : " + (string.IsNullOrEmpty(googleApiKey) ? "MISSING ❌" : "OK ✓ (" + googleApiKey.Length + " chars)"));
-        Debug.Log("  ollamaUrl    : " + (string.IsNullOrEmpty(ollamaUrl) ? "MISSING ❌" : ollamaUrl));
-        Debug.Log("  ollamaModel  : " + (string.IsNullOrEmpty(ollamaModel) ? "MISSING ❌" : ollamaModel));
-        Debug.Log("  promptMs     : " + (string.IsNullOrEmpty(promptMs) ? "MISSING ❌" : "OK ✓ (" + promptMs.Length + " chars)"));
-        Debug.Log("  ttsVoiceMs   : " + (string.IsNullOrEmpty(ttsVoiceNameMs) ? "MISSING ❌" : ttsVoiceNameMs));
+        Debug.Log("  googleApiKey     : " + (string.IsNullOrEmpty(googleApiKey) ? "MISSING ❌" : "OK ✓ (" + googleApiKey.Length + " chars)"));
+        Debug.Log("  huggingFaceApiKey: " + (string.IsNullOrEmpty(huggingFaceApiKey) ? "MISSING ❌" : "OK ✓ (" + huggingFaceApiKey.Length + " chars)"));
+        Debug.Log("  ollamaUrl        : " + (string.IsNullOrEmpty(ollamaUrl) ? "MISSING ❌" : ollamaUrl));
+        Debug.Log("  ollamaModel      : " + (string.IsNullOrEmpty(ollamaModel) ? "MISSING ❌" : ollamaModel));
+        Debug.Log("  promptMs         : " + (string.IsNullOrEmpty(promptMs) ? "MISSING ❌" : "OK ✓ (" + promptMs.Length + " chars)"));
+        Debug.Log("  ttsVoiceMs       : " + (string.IsNullOrEmpty(ttsVoiceNameMs) ? "MISSING ❌" : ttsVoiceNameMs));
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -304,28 +308,40 @@ public class VoicePipelinePuteri : MonoBehaviour
 
     string DetectLanguage(string text)
     {
+        // Chinese characters — instant match
         if (Regex.IsMatch(text, @"[\u4e00-\u9fff]"))
             return "zh-CN";
 
         string lower = text.ToLower();
-        string[] malayMarkers =
+
+        // Strong Malay-only markers — 1 match is enough
+        string[] strongMalayMarkers =
         {
-        "apa", "siapa", "kenapa", "bagaimana", "di mana",
-        "awak", "kamu", "saya", "anda", "dengan", "untuk",
-        "tidak", "ada", "adalah", "ini", "itu", "yang",
-        "boleh", "mahu", "sudah", "belum", "bukan", "juga",
-        "cerita", "siapakah", "apakah", "mengapa", "kau",
-        "dia", "mereka", "kami", "kita", "punya", "sangat",
-        "encik", "cikgu", "tuan", "puan", "selamat", "terima",
-        "puteri", "gunung", "ledang", "raja", "hikayat"
-    };
+            "awak", "kamu", "saya", "anda", "tidak", "adalah",
+            "boleh", "mahu", "sudah", "belum", "bukan",
+            "siapa", "kenapa", "bagaimana", "mengapa",
+            "puteri", "gunung", "ledang", "hikayat",
+            "encik", "cikgu", "tuan", "puan"
+        };
 
-        int malayCount = 0;
-        foreach (string marker in malayMarkers)
+        foreach (string marker in strongMalayMarkers)
             if (lower.Contains(marker))
-                malayCount++;
+                return "ms-MY";
 
-        if (malayCount >= 2)   // ← needs 2+ matches to be Malay
+        // Weak markers — need 2+ matches to count as Malay
+        string[] weakMalayMarkers =
+        {
+            "apa", "ada", "ini", "itu", "yang", "dia",
+            "dengan", "untuk", "juga", "kita", "kami",
+            "raja", "cerita", "selamat", "terima"
+        };
+
+        int weakCount = 0;
+        foreach (string marker in weakMalayMarkers)
+            if (lower.Contains(marker))
+                weakCount++;
+
+        if (weakCount >= 2)
             return "ms-MY";
 
         return "en-US";
@@ -400,18 +416,18 @@ public class VoicePipelinePuteri : MonoBehaviour
     {
         statusMessage = "🎭 Reading emotion...";
 
-        // ── Truncate to first 200 chars to avoid Ollama 400 error ──
+        // Truncate to first 200 chars — emotion model only needs a short sample
         string shortText = replyText.Length > 200
             ? replyText.Substring(0, 200)
             : replyText;
 
         string dominantEmotion = "neutral";
 
+        // Use HuggingFace for emotion detection (zero RAM, free tier)
         yield return StartCoroutine(
-            emotionDetector.DetectEmotion(
-                shortText,        // ← use shortText instead of replyText
-                ollamaUrl,
-                ollamaModel,
+            emotionDetector.DetectEmotionHF(
+                shortText,
+                huggingFaceApiKey,
                 result => dominantEmotion = result
             )
         );
@@ -421,7 +437,7 @@ public class VoicePipelinePuteri : MonoBehaviour
         if (bridge != null)
             bridge.OnAIResponseReceived(dominantEmotion);
 
-        StartCoroutine(SendToTTS(replyText));  // ← still speak full reply
+        StartCoroutine(SendToTTS(replyText));
     }
 
     // ─────────────────────────────────────────────────────────────────────

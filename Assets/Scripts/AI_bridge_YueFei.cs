@@ -1,9 +1,9 @@
 ﻿using UnityEngine;
 
-public class AIBridgeYueFei : MonoBehaviour
+public class AI_bridge_YueFei : MonoBehaviour 
 {
     [Header("Environment Manager")]
-    public EnvironmentManagerYueFei envManager;
+    public EnvironmentManager_YueFei envManager;
 
     // ─────────────────────────────────────────────
     //  Called by VoicePipeline after emotion
@@ -25,6 +25,10 @@ public class AIBridgeYueFei : MonoBehaviour
 
     // ─────────────────────────────────────────────
     //  Maps emotion labels → environment states
+    //    Normal    — Golden dawn, calm battlefield
+    //    Sad       — Grey rain, mourning
+    //    Angry     — Red sky, fire and smoke
+    //    Spiritual — Ethereal glow, petals
     // ─────────────────────────────────────────────
     private string NormalizeEmotion(string raw)
     {
