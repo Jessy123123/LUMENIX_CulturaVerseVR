@@ -36,3 +36,15 @@ Assets/*.wav
 Assets/*.mp3
 Assets/StreamingAssets/config.json
 Assets/StreamingAssets/config.json.meta
+
+# Android / IL2CPP
+*.apk
+*.aab
+*.unitypackage
+.gradle/
+*.log
+*.tmp
+*.utmp/
+
+Mobile_BackUpThisFolder_ButDontShipItWithYourGame/
+*BurstDebugInformation*
