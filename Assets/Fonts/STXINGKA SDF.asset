@@ -110,8 +110,7 @@ MonoBehaviour:
   m_CharacterTable: []
   m_AtlasTextures:
   - {fileID: 4892919337969276717}
-  - {fileID: -5095770308621230103}
-  m_AtlasTextureIndex: 1
+  m_AtlasTextureIndex: 0
   m_IsMultiAtlasTexturesEnabled: 1
   m_GetFontFeatures: 1
   m_ClearDynamicDataOnBuild: 1

@@ -5,6 +5,7 @@ using UnityEngine.Networking;
 using System.Collections;
 using System.Text;
 
+#if !UNITY_WEBGL
 public class VoiceRecorder : MonoBehaviour
 {
     private AudioClip clip;
@@ -231,3 +232,5 @@ public class VoiceRecorder : MonoBehaviour
         }
     }
 }
+
+#endif

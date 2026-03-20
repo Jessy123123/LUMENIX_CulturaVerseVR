@@ -93,8 +93,10 @@ public class VoicePipeline : MonoBehaviour
         if (emotionDetector == null)
             emotionDetector = gameObject.AddComponent<EmotionDetector>();
 
+#if !UNITY_WEBGL
         foreach (string device in Microphone.devices)
             Debug.Log("Mic found: " + device);
+#endif
 
         isProcessing = true;
         statusMessage = "⏳ Yue Fei is speaking...";
@@ -191,22 +193,32 @@ public class VoicePipeline : MonoBehaviour
 
     void StartRecording()
     {
+#if UNITY_WEBGL
+        Debug.LogWarning("Microphone not supported in WebGL");
+        statusMessage = "❌ Microphone not supported on Web";
+        return;
+#else
         recording = true;
         isProcessing = false;
-        detectedLanguage = "zh-CN";   // reset to Chinese default each round
+        detectedLanguage = "zh-CN";
         statusMessage = "🎙️ Recording... (release SPACE to send)";
         clip = Microphone.Start(null, false, 5, 16000);
         Debug.Log("Recording...");
+#endif
     }
 
     void StopRecording()
     {
+#if UNITY_WEBGL
+        return;
+#else
         recording = false;
         isProcessing = true;
         statusMessage = "⏳ Processing...";
         Microphone.End(null);
         Debug.Log("Recording stopped");
         StartCoroutine(SendToSTT());
+#endif
     }
 
     public static byte[] AudioClipToWav(AudioClip clip)

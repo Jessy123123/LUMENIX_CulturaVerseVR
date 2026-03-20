@@ -94,8 +94,10 @@ public class VoicePipelinePuteri : MonoBehaviour
         if (emotionDetector == null)
             emotionDetector = gameObject.AddComponent<EmotionDetector>();
 
+#if !UNITY_WEBGL
         foreach (string device in Microphone.devices)
             Debug.Log("Mic found: " + device);
+#endif
 
         isProcessing = true;
         statusMessage = "⏳ Puteri is speaking...";
@@ -192,22 +194,32 @@ public class VoicePipelinePuteri : MonoBehaviour
 
     void StartRecording()
     {
-        recording = true;
-        isProcessing = false;
-        detectedLanguage = "ms-MY";
-        statusMessage = "🎙️ Recording... (release SPACE to send)";
-        clip = Microphone.Start(null, false, 5, 16000);
-        Debug.Log("Recording...");
+#if UNITY_WEBGL
+        Debug.LogWarning("Microphone not supported in WebGL");
+        statusMessage = "❌ Microphone not supported on Web";
+        return;
+#else
+    recording = true;
+    isProcessing = false;
+    detectedLanguage = "ms-MY";
+    statusMessage = "🎙️ Recording... (release SPACE to send)";
+    clip = Microphone.Start(null, false, 5, 16000);
+    Debug.Log("Recording...");
+#endif
     }
 
     void StopRecording()
     {
-        recording = false;
-        isProcessing = true;
-        statusMessage = "⏳ Processing...";
-        Microphone.End(null);
-        Debug.Log("Recording stopped");
-        StartCoroutine(SendToSTT());
+#if UNITY_WEBGL
+        return;
+#else
+    recording = false;
+    isProcessing = true;
+    statusMessage = "⏳ Processing...";
+    Microphone.End(null);
+    Debug.Log("Recording stopped");
+    StartCoroutine(SendToSTT());
+#endif
     }
 
     public static byte[] AudioClipToWav(AudioClip clip)
@@ -509,11 +521,10 @@ public class VoicePipelinePuteri : MonoBehaviour
     {
         statusMessage = "💬 Puteri is speaking...";
 
-        string tempPath = Application.temporaryCachePath + "/puteri_voice.mp3";
-        File.WriteAllBytes(tempPath, mp3Data);
+        string url = "data:audio/mp3;base64," + System.Convert.ToBase64String(mp3Data);
 
         using (UnityWebRequest audioRequest = UnityWebRequestMultimedia.GetAudioClip(
-                   "file://" + tempPath, AudioType.MPEG))
+                url, AudioType.MPEG))
         {
             yield return audioRequest.SendWebRequest();
 
