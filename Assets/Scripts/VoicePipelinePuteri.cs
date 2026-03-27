@@ -81,7 +81,20 @@ public class VoicePipelinePuteri : MonoBehaviour
 
     void Awake()
     {
-        // Don't clear — VoiceRecorderPuteri may have already written pre-recorded captions
+        // ✅ Auto-share caption references from VoiceRecorderPuteri if not manually assigned
+        if (captionText == null || captionScrollRect == null)
+        {
+            VoiceRecorderPuteri recorder = FindObjectOfType<VoiceRecorderPuteri>();
+            if (recorder != null)
+            {
+                if (captionText == null && recorder.captionText != null)
+                    captionText = recorder.captionText;
+                if (captionScrollRect == null && recorder.captionScrollRect != null)
+                    captionScrollRect = recorder.captionScrollRect;
+                Debug.Log("VoicePipelinePuteri: auto-linked caption references from VoiceRecorderPuteri");
+            }
+        }
+        // Don't clear text — VoiceRecorderPuteri may have already written pre-recorded captions
     }
 
     void Start()
