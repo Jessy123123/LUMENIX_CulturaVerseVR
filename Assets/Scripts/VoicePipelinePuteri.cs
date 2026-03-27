@@ -1,9 +1,10 @@
-﻿using System.Collections;
+using System.Collections;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityEngine.Networking;
+using UnityEngine.UI;
 using TMPro;
 
 public class VoicePipelinePuteri : MonoBehaviour
@@ -18,6 +19,10 @@ public class VoicePipelinePuteri : MonoBehaviour
 
     [Header("Captions")]
     public TextMeshProUGUI captionText;
+
+    [Header("Scroll View")]
+    [Tooltip("Assign the ScrollRect component from your Scroll View here")]
+    public ScrollRect captionScrollRect;
 
     [Header("Fonts")]
     public TMP_FontAsset fontChinese;
@@ -76,8 +81,7 @@ public class VoicePipelinePuteri : MonoBehaviour
 
     void Awake()
     {
-        if (captionText != null)
-            captionText.text = "";
+        // Don't clear — VoiceRecorderPuteri may have already written pre-recorded captions
     }
 
     void Start()
@@ -366,13 +370,19 @@ public class VoicePipelinePuteri : MonoBehaviour
             detectedLanguage == "zh-CN" ? promptZh :
             promptEn;
 
+        // ✅ Strictly enforce single language — no mixing allowed
+        string languageInstruction =
+            detectedLanguage == "ms-MY" ? "IMPORTANT: Reply ONLY in Malay (Bahasa Melayu). Do NOT use any English or Chinese words." :
+            detectedLanguage == "zh-CN" ? "重要：只用中文回答。不要混入任何英文或马来文。" :
+            "IMPORTANT: Reply ONLY in English. Do NOT use any Malay or Chinese words.";
+
         if (string.IsNullOrEmpty(prompt))
             Debug.LogWarning("Prompt is empty for language: " + detectedLanguage);
 
         var ollamaRequest = new OllamaRequest
         {
             model = ollamaModel,
-            prompt = prompt + "\n\nUser: " + userText + "\nPuteri:",
+            prompt = prompt + "\n\n" + languageInstruction + "\n\nUser: " + userText + "\nPuteri:",
             stream = false
         };
 
@@ -509,11 +519,8 @@ public class VoicePipelinePuteri : MonoBehaviour
     {
         statusMessage = "💬 Puteri is speaking...";
 
-        // Write to temp file
         string tempPath = Path.Combine(Application.temporaryCachePath, "puteri_tts.mp3");
         File.WriteAllBytes(tempPath, mp3Data);
-
-        // Load via file:// with proper Windows path formatting
         string fileUrl = "file:///" + tempPath.Replace("\\", "/");
 
         Debug.Log("Loading audio from: " + fileUrl);
@@ -530,7 +537,6 @@ public class VoicePipelinePuteri : MonoBehaviour
             if (audioRequest.result != UnityWebRequest.Result.Success)
             {
                 Debug.LogError("Audio load error: " + audioRequest.error);
-                Debug.LogError("Trying fallback...");
                 StartCoroutine(PlayMp3Fallback(tempPath));
                 yield break;
             }
@@ -539,33 +545,34 @@ public class VoicePipelinePuteri : MonoBehaviour
 
             if (ttsClip == null || ttsClip.length == 0)
             {
-                Debug.LogError("AudioClip is null or empty! Length: " + (ttsClip?.length ?? -1));
+                Debug.LogError("AudioClip is null or empty!");
                 ResetToIdle();
                 yield break;
             }
 
-            Debug.Log("AudioClip loaded! Length: " + ttsClip.length + "s, Samples: " + ttsClip.samples);
+            Debug.Log("AudioClip loaded! Length: " + ttsClip.length + "s");
 
-            // Show caption
+            // ✅ Set font before playing
             if (captionText != null)
             {
                 if (detectedLanguage == "zh-CN" && fontChinese != null)
                     captionText.font = fontChinese;
                 else if (fontDefault != null)
                     captionText.font = fontDefault;
-
-                captionText.text = currentReplyText;
             }
 
-            yield return null;
-
+            // ✅ Start audio and typewriter AT THE SAME TIME
             characterVoice.clip = ttsClip;
             characterVoice.Play();
 
-            Debug.Log("characterVoice.isPlaying: " + characterVoice.isPlaying);
-
             if (characterAnimator != null)
                 characterAnimator.SetBool("IsTalking", true);
+
+            // ✅ Run typewriter synced to audio duration (appends to history)
+            if (captionText != null)
+                StartCoroutine(TypewriterSync(currentReplyText, ttsClip.length));
+
+            Debug.Log("characterVoice.isPlaying: " + characterVoice.isPlaying);
 
             yield return new WaitForSeconds(ttsClip.length);
 
@@ -574,6 +581,34 @@ public class VoicePipelinePuteri : MonoBehaviour
 
             ResetToIdle();
         }
+    }
+
+    // ✅ Typewriter that finishes exactly when audio ends (appends to history)
+    IEnumerator TypewriterSync(string fullText, float audioDuration)
+    {
+        if (captionText == null) yield break;
+
+        int totalChars = fullText.Length;
+        if (totalChars == 0) yield break;
+
+        float delayPerChar = audioDuration / totalChars;
+
+        // Clamp so it doesn't feel too slow or too fast
+        delayPerChar = Mathf.Clamp(delayPerChar, 0.01f, 0.08f);
+
+        // Add a newline separator before appending if there's existing text
+        string prefix = string.IsNullOrEmpty(captionText.text) ? "" : captionText.text + "\n";
+
+        for (int i = 0; i < totalChars; i++)
+        {
+            captionText.text = prefix + fullText.Substring(0, i + 1);
+            ScrollToBottom();
+            yield return new WaitForSeconds(delayPerChar);
+        }
+
+        // Ensure full text is shown by the end
+        captionText.text = prefix + fullText;
+        ScrollToBottom();
     }
 
     // Fallback: use AudioSource.PlayOneShot with Resources if above fails
@@ -605,7 +640,13 @@ public class VoicePipelinePuteri : MonoBehaviour
             }
 
             if (captionText != null)
-                captionText.text = currentReplyText;
+            {
+                if (string.IsNullOrEmpty(captionText.text))
+                    captionText.text = currentReplyText;
+                else
+                    captionText.text += "\n" + currentReplyText;
+                ScrollToBottom();
+            }
 
             characterVoice.clip = ttsClip;
             characterVoice.Play();
@@ -623,16 +664,25 @@ public class VoicePipelinePuteri : MonoBehaviour
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  Helper
+    //  Helpers
     // ─────────────────────────────────────────────────────────────────────
 
     void ResetToIdle()
     {
         isProcessing = false;
         statusMessage = "Press and Hold SPACE to talk";
+        // Caption history is preserved — not cleared
+    }
 
-        // ✅ Clear caption when Puteri finishes speaking
-        if (captionText != null)
-            captionText.text = "";
+    /// <summary>
+    /// Scrolls the caption ScrollRect to the bottom so the latest line is visible.
+    /// </summary>
+    void ScrollToBottom()
+    {
+        if (captionScrollRect != null)
+        {
+            Canvas.ForceUpdateCanvases();
+            captionScrollRect.verticalNormalizedPosition = 0f;
+        }
     }
 }
