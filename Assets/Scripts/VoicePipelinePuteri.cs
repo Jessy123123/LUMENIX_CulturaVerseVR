@@ -4,24 +4,8 @@ using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityEngine.Networking;
+using TMPro;
 
-/// <summary>
-/// VoicePipelinePuteri — voice pipeline for the Puteri Gunung Ledang NPC.
-///
-/// Pipeline:
-///   SPACE held  →  Microphone (16 kHz, max 5 s)
-///               →  Google STT  (primary: ms-MY, fallback: zh-CN, en-US)
-///               →  DetectLanguage()
-///               →  Ollama LLM  (character reply)
-///               →  EmotionDetector  (HuggingFace API — zero RAM, free tier)
-///               →  AIBridgePuteri.OnAIResponseReceived(emotion)
-///               →  Google TTS  (female voice, +2st pitch)
-///               →  AudioSource playback + Animator IsTalking
-///
-/// FIX: Uses manual JSON parsing instead of JsonUtility to handle
-///      Unicode characters and long prompt strings in config.json.
-/// FIX: EmotionDetector now uses HuggingFace instead of Ollama.
-/// </summary>
 public class VoicePipelinePuteri : MonoBehaviour
 {
     // ── Inspector ─────────────────────────────────────────────────────────
@@ -31,6 +15,13 @@ public class VoicePipelinePuteri : MonoBehaviour
     [Header("NPC References")]
     public AudioSource characterVoice;
     public Animator characterAnimator;
+
+    [Header("Captions")]
+    public TextMeshProUGUI captionText;
+
+    [Header("Fonts")]
+    public TMP_FontAsset fontChinese;
+    public TMP_FontAsset fontDefault;
 
     // ── Config (loaded from StreamingAssets/config.json) ──────────────────
     private string googleApiKey;
@@ -54,6 +45,7 @@ public class VoicePipelinePuteri : MonoBehaviour
     private bool recording = false;
     private bool isProcessing = false;
     private string detectedLanguage = "ms-MY";
+    private string currentReplyText = "";
 
     public string statusMessage = "⏳ Puteri is speaking...";
 
@@ -62,17 +54,13 @@ public class VoicePipelinePuteri : MonoBehaviour
 
     // ─────────────────────────────────────────────────────────────────────
     //  Lightweight JSON field extractor
-    //  Replaces JsonUtility which silently drops fields containing
-    //  Unicode characters, long strings, or special prompt text.
     // ─────────────────────────────────────────────────────────────────────
     private string ExtractJsonField(string json, string fieldName)
     {
-        // Matches: "fieldName": "value"  (handles escaped quotes inside value)
         string pattern = "\"" + fieldName + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"";
         Match m = Regex.Match(json, pattern);
         if (!m.Success) return "";
 
-        // Unescape standard JSON escape sequences
         string val = m.Groups[1].Value;
         val = val.Replace("\\n", "\n")
                  .Replace("\\r", "\r")
@@ -85,6 +73,12 @@ public class VoicePipelinePuteri : MonoBehaviour
     // ─────────────────────────────────────────────────────────────────────
     //  Unity lifecycle
     // ─────────────────────────────────────────────────────────────────────
+
+    void Awake()
+    {
+        if (captionText != null)
+            captionText.text = "";
+    }
 
     void Start()
     {
@@ -144,7 +138,7 @@ public class VoicePipelinePuteri : MonoBehaviour
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  Config loader — uses manual regex extraction instead of JsonUtility
+    //  Config loader
     // ─────────────────────────────────────────────────────────────────────
 
     void LoadConfig()
@@ -159,13 +153,11 @@ public class VoicePipelinePuteri : MonoBehaviour
 
         string json = File.ReadAllText(path, Encoding.UTF8);
 
-        // ── Core ──────────────────────────────────────────────────────────
         googleApiKey = ExtractJsonField(json, "googleApiKey");
         huggingFaceApiKey = ExtractJsonField(json, "huggingFaceApiKey");
         ollamaUrl = ExtractJsonField(json, "ollamaUrl");
         ollamaModel = ExtractJsonField(json, "ollamaModel");
 
-        // ── Puteri TTS voices ─────────────────────────────────────────────
         ttsLanguageCodeMs = ExtractJsonField(json, "puteriTtsLanguageCodeMs");
         ttsVoiceNameMs = ExtractJsonField(json, "puteriTtsVoiceNameMs");
         ttsLanguageCodeZh = ExtractJsonField(json, "puteriTtsLanguageCodeZh");
@@ -173,12 +165,10 @@ public class VoicePipelinePuteri : MonoBehaviour
         ttsLanguageCodeEn = ExtractJsonField(json, "puteriTtsLanguageCodeEn");
         ttsVoiceNameEn = ExtractJsonField(json, "puteriTtsVoiceNameEn");
 
-        // ── Puteri prompts ────────────────────────────────────────────────
         promptMs = ExtractJsonField(json, "puteriPromptMs");
         promptZh = ExtractJsonField(json, "puteriPromptZh");
         promptEn = ExtractJsonField(json, "puteriPromptEn");
 
-        // ── Validation log ────────────────────────────────────────────────
         Debug.Log("Puteri: config.json loaded.");
         Debug.Log("  googleApiKey     : " + (string.IsNullOrEmpty(googleApiKey) ? "MISSING ❌" : "OK ✓ (" + googleApiKey.Length + " chars)"));
         Debug.Log("  huggingFaceApiKey: " + (string.IsNullOrEmpty(huggingFaceApiKey) ? "MISSING ❌" : "OK ✓ (" + huggingFaceApiKey.Length + " chars)"));
@@ -199,12 +189,12 @@ public class VoicePipelinePuteri : MonoBehaviour
         statusMessage = "❌ Microphone not supported on Web";
         return;
 #else
-    recording = true;
-    isProcessing = false;
-    detectedLanguage = "ms-MY";
-    statusMessage = "🎙️ Recording... (release SPACE to send)";
-    clip = Microphone.Start(null, false, 5, 16000);
-    Debug.Log("Recording...");
+        recording = true;
+        isProcessing = false;
+        detectedLanguage = "ms-MY";
+        statusMessage = "🎙️ Recording... (release SPACE to send)";
+        clip = Microphone.Start(null, false, 5, 16000);
+        Debug.Log("Recording...");
 #endif
     }
 
@@ -213,12 +203,12 @@ public class VoicePipelinePuteri : MonoBehaviour
 #if UNITY_WEBGL
         return;
 #else
-    recording = false;
-    isProcessing = true;
-    statusMessage = "⏳ Processing...";
-    Microphone.End(null);
-    Debug.Log("Recording stopped");
-    StartCoroutine(SendToSTT());
+        recording = false;
+        isProcessing = true;
+        statusMessage = "⏳ Processing...";
+        Microphone.End(null);
+        Debug.Log("Recording stopped");
+        StartCoroutine(SendToSTT());
 #endif
     }
 
@@ -320,13 +310,11 @@ public class VoicePipelinePuteri : MonoBehaviour
 
     string DetectLanguage(string text)
     {
-        // Chinese characters — instant match
         if (Regex.IsMatch(text, @"[\u4e00-\u9fff]"))
             return "zh-CN";
 
         string lower = text.ToLower();
 
-        // Strong Malay-only markers — 1 match is enough
         string[] strongMalayMarkers =
         {
             "awak", "kamu", "saya", "anda", "tidak", "adalah",
@@ -340,7 +328,6 @@ public class VoicePipelinePuteri : MonoBehaviour
             if (lower.Contains(marker))
                 return "ms-MY";
 
-        // Weak markers — need 2+ matches to count as Malay
         string[] weakMalayMarkers =
         {
             "apa", "ada", "ini", "itu", "yang", "dia",
@@ -428,14 +415,15 @@ public class VoicePipelinePuteri : MonoBehaviour
     {
         statusMessage = "🎭 Reading emotion...";
 
-        // Truncate to first 200 chars — emotion model only needs a short sample
+        // ✅ Save reply so PlayMp3 can show it as caption
+        currentReplyText = replyText;
+
         string shortText = replyText.Length > 200
             ? replyText.Substring(0, 200)
             : replyText;
 
         string dominantEmotion = "neutral";
 
-        // Use HuggingFace for emotion detection (zero RAM, free tier)
         yield return StartCoroutine(
             emotionDetector.DetectEmotionHF(
                 shortText,
@@ -521,34 +509,114 @@ public class VoicePipelinePuteri : MonoBehaviour
     {
         statusMessage = "💬 Puteri is speaking...";
 
-        string url = "data:audio/mp3;base64," + System.Convert.ToBase64String(mp3Data);
+        // Write to temp file
+        string tempPath = Path.Combine(Application.temporaryCachePath, "puteri_tts.mp3");
+        File.WriteAllBytes(tempPath, mp3Data);
+
+        // Load via file:// with proper Windows path formatting
+        string fileUrl = "file:///" + tempPath.Replace("\\", "/");
+
+        Debug.Log("Loading audio from: " + fileUrl);
 
         using (UnityWebRequest audioRequest = UnityWebRequestMultimedia.GetAudioClip(
-                url, AudioType.MPEG))
+                fileUrl, AudioType.MPEG))
+        {
+            ((DownloadHandlerAudioClip)audioRequest.downloadHandler).streamAudio = true;
+
+            yield return audioRequest.SendWebRequest();
+
+            Debug.Log("Audio request result: " + audioRequest.result);
+
+            if (audioRequest.result != UnityWebRequest.Result.Success)
+            {
+                Debug.LogError("Audio load error: " + audioRequest.error);
+                Debug.LogError("Trying fallback...");
+                StartCoroutine(PlayMp3Fallback(tempPath));
+                yield break;
+            }
+
+            AudioClip ttsClip = DownloadHandlerAudioClip.GetContent(audioRequest);
+
+            if (ttsClip == null || ttsClip.length == 0)
+            {
+                Debug.LogError("AudioClip is null or empty! Length: " + (ttsClip?.length ?? -1));
+                ResetToIdle();
+                yield break;
+            }
+
+            Debug.Log("AudioClip loaded! Length: " + ttsClip.length + "s, Samples: " + ttsClip.samples);
+
+            // Show caption
+            if (captionText != null)
+            {
+                if (detectedLanguage == "zh-CN" && fontChinese != null)
+                    captionText.font = fontChinese;
+                else if (fontDefault != null)
+                    captionText.font = fontDefault;
+
+                captionText.text = currentReplyText;
+            }
+
+            yield return null;
+
+            characterVoice.clip = ttsClip;
+            characterVoice.Play();
+
+            Debug.Log("characterVoice.isPlaying: " + characterVoice.isPlaying);
+
+            if (characterAnimator != null)
+                characterAnimator.SetBool("IsTalking", true);
+
+            yield return new WaitForSeconds(ttsClip.length);
+
+            if (characterAnimator != null)
+                characterAnimator.SetBool("IsTalking", false);
+
+            ResetToIdle();
+        }
+    }
+
+    // Fallback: use AudioSource.PlayOneShot with Resources if above fails
+    IEnumerator PlayMp3Fallback(string tempPath)
+    {
+        Debug.Log("Fallback: trying UnityWebRequest loader...");
+
+        string fileUrl = "file:///" + tempPath.Replace("\\", "/");
+
+        using (UnityWebRequest audioRequest = UnityWebRequestMultimedia.GetAudioClip(
+                fileUrl, AudioType.MPEG))
         {
             yield return audioRequest.SendWebRequest();
 
             if (audioRequest.result != UnityWebRequest.Result.Success)
             {
-                Debug.LogError("Audio load error: " + audioRequest.error);
+                Debug.LogError("Fallback audio error: " + audioRequest.error);
                 ResetToIdle();
                 yield break;
             }
 
             AudioClip ttsClip = DownloadHandlerAudioClip.GetContent(audioRequest);
+
+            if (ttsClip == null)
+            {
+                Debug.LogError("Fallback AudioClip is null!");
+                ResetToIdle();
+                yield break;
+            }
+
+            if (captionText != null)
+                captionText.text = currentReplyText;
+
             characterVoice.clip = ttsClip;
             characterVoice.Play();
 
             if (characterAnimator != null)
                 characterAnimator.SetBool("IsTalking", true);
 
-            Debug.Log("Puteri is speaking...");
             yield return new WaitForSeconds(ttsClip.length);
 
             if (characterAnimator != null)
                 characterAnimator.SetBool("IsTalking", false);
-            else
-                Debug.LogError("characterAnimator is NULL — assign it in the Inspector!");
 
             ResetToIdle();
         }
@@ -562,5 +630,9 @@ public class VoicePipelinePuteri : MonoBehaviour
     {
         isProcessing = false;
         statusMessage = "Press and Hold SPACE to talk";
+
+        // ✅ Clear caption when Puteri finishes speaking
+        if (captionText != null)
+            captionText.text = "";
     }
 }

@@ -1,22 +1,61 @@
 using UnityEngine;
 using System.Collections;
+using TMPro;
 
 public class VoiceRecorderPuteri : MonoBehaviour
 {
+    [Header("Animation")]
     public Animator animator;
+
+    [Header("Audio")]
     public AudioSource audioSource;
-    public AudioClip voiceClip;
+
+    [Header("Captions")]
+    public TextMeshProUGUI captionText;
+
+    [System.Serializable]
+    public class VoiceClipWithCaption
+    {
+        public AudioClip clip;
+        [TextArea(2, 5)]
+        public string caption;
+    }
+
+    public VoiceClipWithCaption[] voiceLines;
+
+    void Awake()
+    {
+        if (captionText != null)
+            captionText.text = "";
+    }
 
     IEnumerator Start()
     {
         yield return new WaitForSeconds(2f);
 
-        animator.SetBool("IsTalking", true);
-        audioSource.clip = voiceClip;
-        audioSource.Play();
+        foreach (var line in voiceLines)
+        {
+            if (line.clip == null) continue;
 
-        yield return new WaitWhile(() => audioSource.isPlaying);
+            // Show caption
+            if (captionText != null)
+                captionText.text = line.caption;
 
-        animator.SetBool("IsTalking", false);
+            // Play animation + audio
+            animator.SetBool("IsTalking", true);
+            audioSource.clip = line.clip;
+            audioSource.Play();
+
+            yield return new WaitWhile(() => audioSource.isPlaying);
+
+            animator.SetBool("IsTalking", false);
+
+            // Small pause between lines
+            yield return new WaitForSeconds(0.5f);
+        }
+
+        // Clear caption when done
+        if (captionText != null)
+            captionText.text = "";
     }
 }
