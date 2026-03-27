@@ -1,0 +1,12 @@
+Font: STXingkai  Style: Regular
+Point Size: 2126   Padding: 9   SP/PD Ratio: 0.4%
+
+Characters included: 13/13
+Missing characters: 0
+Excluded characters: 0
+
+Characters missing from font file:
+----------------------------------------
+
+Characters excluded from packing:
+----------------------------------------
