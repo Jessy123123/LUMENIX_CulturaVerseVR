@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityEngine.Networking;
+using TMPro;
 
 /// <summary>
 /// VoicePipeline — voice pipeline for the Yue Fei NPC.
@@ -25,6 +26,7 @@ using UnityEngine.Networking;
 /// </summary>
 public class VoicePipeline : MonoBehaviour
 {
+    public TextMeshProUGUI dialogueText;
     // ── Inspector ─────────────────────────────────────────────────────────
     [Header("Environment Bridge")]
     public AI_bridge_YueFei bridge;
@@ -202,13 +204,15 @@ public class VoicePipeline : MonoBehaviour
         isProcessing = false;
         detectedLanguage = "zh-CN";
         statusMessage = "🎙️ Recording... (release SPACE to send)";
-        clip = Microphone.Start(null, false, 5, 16000);
+        clip = Microphone.Start(Microphone.devices[0], false, 5, 16000);
         Debug.Log("Recording...");
 #endif
     }
 
     void StopRecording()
     {
+        Debug.Log("🎙️ Samples recorded: " + clip.samples);
+        Debug.Log("🎙️ Frequency: " + clip.frequency);
 #if UNITY_WEBGL
         return;
 #else
@@ -230,7 +234,7 @@ public class VoicePipeline : MonoBehaviour
 
         foreach (var sample in samples)
         {
-            float amplified = Mathf.Clamp(sample * 3f, -1f, 1f);
+            float amplified = Mathf.Clamp(sample * 10f, -1f, 1f);
             short value = (short)(amplified * short.MaxValue);
             System.BitConverter.GetBytes(value).CopyTo(bytes, offset);
             offset += 2;
@@ -405,17 +409,64 @@ public class VoicePipeline : MonoBehaviour
             yield break;
         }
 
-        OllamaResponse ollamaResponse = JsonUtility.FromJson<OllamaResponse>(request.downloadHandler.text);
-        string replyText = ollamaResponse.response
-            .Replace("\n", " ")
-            .Replace("\r", " ")
-            .Replace("\"", "'")
-            .Replace("\\", " ")
+        string responseText = request.downloadHandler.text;
+
+        // 🔥 EXTRACT FULL RESPONSE MANUALLY
+        string raw = request.downloadHandler.text;
+
+        // 🔥 HARD EXTRACT (NO REGEX LIMIT)
+        int start = raw.IndexOf("\"response\":\"");
+        int end = raw.LastIndexOf("\"}");
+
+        string replyText = "";
+
+        // ✅ SAFE CHECK
+        if (start != -1 && end != -1 && end > start)
+        {
+            start += 12; // move after "response":"
+            replyText = raw.Substring(start, end - start);
+        }
+        else
+        {
+            Debug.LogWarning("⚠️ Failed to parse response safely, using fallback");
+            replyText = raw; // fallback
+        }
+
+        // 🔥 CLEAN ESCAPES
+        replyText = replyText
+            .Replace("\\n", " ")
+            .Replace("\\\"", "\"")
+            .Replace("\\", "")
             .Trim();
 
+        // fallback if extraction fails
+        if (string.IsNullOrEmpty(replyText))
+        {
+            Debug.LogWarning("⚠️ Fallback to raw response");
+            replyText = responseText;
+        }
+
+        // 🔥 FORCE USE FULL TEXT (REMOVE FIRST SENTENCE TRUNCATION)
+        replyText = replyText.Replace("\n", " ").Replace("\r", " ").Trim();
+
+        // 🔥 REMOVE SHORT INTRO LIKE "My name is Yue Fei."
+        if (replyText.StartsWith("My name is Yue Fei"))
+        {
+            int index = replyText.IndexOf(".");
+            if (index > 0 && index < replyText.Length - 1)
+            {
+                replyText = replyText.Substring(index + 1).Trim();
+            }
+        }
+
         Debug.Log("Ollama reply: " + replyText);
+        if (dialogueText != null)
+        {
+            dialogueText.text = "Yue Fei: " + replyText;
+        }
 
         StartCoroutine(DetectEmotionThenSpeak(replyText));
+        Debug.Log("🧠 FINAL REPLY USED EVERYWHERE: " + replyText);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -423,14 +474,16 @@ public class VoicePipeline : MonoBehaviour
     //  HuggingFace primary → keyword fallback
     // ─────────────────────────────────────────────────────────────────────
 
-    IEnumerator DetectEmotionThenSpeak(string replyText)
+    IEnumerator DetectEmotionThenSpeak(string originalText)
     {
         statusMessage = "🎭 Reading emotion...";
 
-        // Truncate to 200 chars — emotion model only needs a short sample
-        string shortText = replyText.Length > 200
-            ? replyText.Substring(0, 200)
-            : replyText;
+        // 🔒 LOCK ORIGINAL TEXT
+        string lockedText = originalText;
+
+        string shortText = lockedText.Length > 200
+            ? lockedText.Substring(0, 200)
+            : lockedText;
 
         string dominantEmotion = "neutral";
 
@@ -447,18 +500,56 @@ public class VoicePipeline : MonoBehaviour
         if (bridge != null)
             bridge.OnAIResponseReceived(dominantEmotion);
 
-        StartCoroutine(SendToTTS(replyText));
+        // 🔥 ALWAYS USE LOCKED TEXT
+        Debug.Log("🔒 FINAL TEXT SENT TO TTS: " + lockedText);
+
+        StartCoroutine(SendToTTS(lockedText));
     }
 
     // ─────────────────────────────────────────────────────────────────────
     //  Step 5 — Google Text-to-Speech (male, -2st pitch)
     // ─────────────────────────────────────────────────────────────────────
 
+    [System.Serializable]
+    public class GoogleTTSRequest
+    {
+        public Input input;
+        public Voice voice;
+        public AudioConfig audioConfig;
+
+        [System.Serializable]
+        public class Input
+        {
+            public string text;
+        }
+
+        [System.Serializable]
+        public class Voice
+        {
+            public string languageCode;
+            public string name;
+        }
+
+        [System.Serializable]
+        public class AudioConfig
+        {
+            public string audioEncoding;
+        }
+    }
+
     IEnumerator SendToTTS(string text)
     {
+        Debug.Log("🔊 FINAL INPUT TO TTS: " + text);
         if (string.IsNullOrEmpty(googleApiKey))
         {
-            Debug.LogError("Google API key not loaded. Check config.json googleApiKey field.");
+            Debug.LogError("❌ Google API key missing");
+            ResetToIdle();
+            yield break;
+        }
+
+        if (string.IsNullOrEmpty(text))
+        {
+            Debug.LogError("❌ TTS text is EMPTY");
             ResetToIdle();
             yield break;
         }
@@ -475,22 +566,35 @@ public class VoicePipeline : MonoBehaviour
             detectedLanguage == "ms-MY" ? ttsVoiceNameMs :
             ttsVoiceNameEn;
 
-        string safeText = text.Replace("\\", "\\\\").Replace("\"", "\\\"");
-        string ssmlText = "<speak><prosody rate='slow' pitch='-2st'>" + safeText + "</prosody></speak>";
+        // 🔥 CLEAN TEXT (avoid JSON/SSML issues)
+        string cleanText = text.Replace("\"", "").Replace("\\", "");
 
-        string json = "{"
-            + "\"input\":{ \"ssml\":\"" + ssmlText + "\" },"
-            + "\"voice\":{"
-                + "\"languageCode\":\"" + voiceLanguage + "\","
-                + "\"name\":\"" + voiceName + "\","
-                + "\"ssmlGender\":\"MALE\""
-            + "},"
-            + "\"audioConfig\":{ \"audioEncoding\":\"MP3\" }"
-        + "}";
+        // 🔥 BUILD SAFE REQUEST
+        GoogleTTSRequest ttsRequest = new GoogleTTSRequest
+        {
+            input = new GoogleTTSRequest.Input
+            {
+                text = cleanText
+            },
+            voice = new GoogleTTSRequest.Voice
+            {
+                languageCode = voiceLanguage,
+                name = voiceName
+            },
+            audioConfig = new GoogleTTSRequest.AudioConfig
+            {
+                audioEncoding = "MP3"
+            }
+        };
+
+        string json = JsonUtility.ToJson(ttsRequest);
+        Debug.Log("📤 FINAL TTS JSON: " + json);
 
         string url = "https://texttospeech.googleapis.com/v1/text:synthesize?key=" + googleApiKey;
+
         UnityWebRequest request = new UnityWebRequest(url, "POST");
         byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+
         request.uploadHandler = new UploadHandlerRaw(bodyRaw);
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
@@ -499,16 +603,27 @@ public class VoicePipeline : MonoBehaviour
 
         if (request.result != UnityWebRequest.Result.Success)
         {
-            Debug.LogError("TTS Error: " + request.error);
-            Debug.LogError("TTS Response: " + request.downloadHandler.text);
+            Debug.LogError("❌ TTS Error: " + request.error);
+            Debug.LogError("❌ TTS Response: " + request.downloadHandler.text);
             ResetToIdle();
             yield break;
         }
 
-        TTSResponse ttsResponse = JsonUtility.FromJson<TTSResponse>(request.downloadHandler.text);
-        byte[] mp3Data = System.Convert.FromBase64String(ttsResponse.audioContent);
+        // 🔥 Parse response manually (SAFER than JsonUtility)
+        string responseText = request.downloadHandler.text;
+        string audioBase64 = ExtractJsonField(responseText, "audioContent");
+
+        if (string.IsNullOrEmpty(audioBase64))
+        {
+            Debug.LogError("❌ No audioContent in response!");
+            ResetToIdle();
+            yield break;
+        }
+
+        byte[] mp3Data = System.Convert.FromBase64String(audioBase64);
 
         StartCoroutine(PlayMp3(mp3Data));
+        Debug.Log("🔊 TEXT RECEIVED BY TTS: " + text);
     }
 
     // ─────────────────────────────────────────────────────────────────────
