@@ -44,6 +44,7 @@ public class EnvironmentManager_YueFei : MonoBehaviour
             angryEnvironment.SetActive(true);
             if (rainParticles != null) rainParticles.Stop();
             RenderSettings.skybox = angrySkybox; // Changes the sky color
+        
             DynamicGI.UpdateEnvironment();       // Refreshes the lighting
             TriggerThunder(); // Flash lightning when angry
         }

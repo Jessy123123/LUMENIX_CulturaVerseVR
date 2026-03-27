@@ -50,7 +50,10 @@ public class EmotionDetector : MonoBehaviour
         }
 
         // ── Try HuggingFace first ─────────────────────────────────────────
-        if (!string.IsNullOrEmpty(hfApiKey))
+        // The HuggingFace model is English-only. If the text has Chinese characters, skip directly to keywords!
+        bool isChinese = Regex.IsMatch(replyText, @"[\u4e00-\u9fff]");
+
+        if (!string.IsNullOrEmpty(hfApiKey) && !isChinese)
         {
             string hfResult = null;
             yield return StartCoroutine(TryHuggingFace(replyText, hfApiKey,
@@ -220,21 +223,21 @@ public class EmotionDetector : MonoBehaviour
             "痛苦", "失落", "思念", "心碎", "哀愁", "淚水"))
             return "sadness";
 
-        // ── Anger ─────────────────────────────────────────────────────────
+        // ── Anger (includes Passion / Ambition / Determination) ────────────────────
         if (ContainsAny(lower,
             // English
             "anger", "angry", "furious", "fury", "rage", "enraged", "outraged",
             "hate", "hatred", "hostile", "mad", "upset", "frustrat", "betrayed",
+            "ambitious", "ambition", "determined", "determination", "passionate", "passion",
             // Malay
             "marah", "kemarahan", "geram", "benci", "dendam", "murka", "berang",
-            "jengkel", "naik angin", "melenting") ||
-            ContainsAny(text,
+            "jengkel", "naik angin", "melenting", "bersemangat", "semangat", "berazam", "azam",
             // Chinese Simplified
             "愤怒", "生气", "发火", "恼火", "愤慨", "怒火", "仇恨", "憎恨",
-            "暴怒", "气愤", "不满", "讨厌",
+            "暴怒", "气愤", "不满", "讨厌", "志气", "抱负", "野心", "雄心", "决心", "激情", "坚定",
             // Chinese Traditional
             "憤怒", "生氣", "發火", "惱火", "憤慨", "怒火", "仇恨", "憎恨",
-            "暴怒", "氣憤", "不滿", "討厭"))
+            "暴怒", "氣憤", "不滿", "討厭", "志氣", "抱負", "野心", "雄心", "決心", "激情", "堅定"))
             return "anger";
 
         // ── Fear ──────────────────────────────────────────────────────────

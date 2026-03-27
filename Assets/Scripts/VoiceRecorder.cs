@@ -1,141 +1,201 @@
 using UnityEngine;
 using System.IO;
-using System.Diagnostics;
+using System.Text;
+using System.Text.RegularExpressions;
 using UnityEngine.Networking;
 using System.Collections;
-using System.Text;
 using TMPro;
+
+/// <summary>
+/// VoiceRecorder — legacy recorder now connected to config.json.
+/// NOTE: If you are using VoicePipeline.cs, DISABLE this script.
+/// Only use VoiceRecorder as a standalone fallback.
+/// </summary>
 
 #if !UNITY_WEBGL
 public class VoiceRecorder : MonoBehaviour
 {
-private AudioClip clip;
-public TextMeshProUGUI instructionText;
-public TextMeshProUGUI dialogueText;
-private bool recording = false;
-string AI_FOLDER = Application.dataPath + "/../AI/";
+    // ── Inspector ─────────────────────────────────────────────────────────
+    public TextMeshProUGUI instructionText;
+    public TextMeshProUGUI dialogueText;
 
-void Start()
-{
-Directory.CreateDirectory(AI_FOLDER);
-UnityEngine.Debug.Log("VoiceRecorder script started");
-}
+    // ── Config (loaded from StreamingAssets/config.json) ──────────────────
+    private string ollamaUrl;
+    private string ollamaModel;
+    private string characterPromptEn;
 
-void Update()
-{
-//UnityEngine.Debug.Log("UPDATE RUNNING");
-if (Input.GetKeyDown(KeyCode.Space))
-{
-    UnityEngine.Debug.Log("START RECORDING");
-    StartRecording();
-}
+    // ── Runtime ───────────────────────────────────────────────────────────
+    private AudioClip clip;
+    private bool recording = false;
+    string AI_FOLDER;
 
-if (Input.GetKeyUp(KeyCode.Space))
-{
-    UnityEngine.Debug.Log("STOP RECORDING");
-    StopRecording();
-    UnityEngine.Debug.Log("Recording finished");
-}
-}
+    // ─────────────────────────────────────────────────────────────────────
+    //  Null-safe dialogue helper
+    // ─────────────────────────────────────────────────────────────────────
+    private void SetDialogue(string message)
+    {
+        if (dialogueText != null)
+        {
+            dialogueText.gameObject.SetActive(true);
+            dialogueText.text = message;
+        }
+        else
+        {
+            Debug.LogError("❌ dialogueText is NULL on VoiceRecorder — assign it in the Inspector!");
+        }
+    }
 
-void StartRecording()
-{
-if (Microphone.devices.Length > 0)
-{
-    clip = Microphone.Start(null, false, 10, 44100);
-}
-else
-{
-    UnityEngine.Debug.LogError("No microphone detected");
-}
-recording = true;
-UnityEngine.Debug.Log("Recording...");
-instructionText.gameObject.SetActive(false);
-dialogueText.text = "Yue Fei is thinking...";
-}
+    // ─────────────────────────────────────────────────────────────────────
+    //  JSON field extractor
+    // ─────────────────────────────────────────────────────────────────────
+    private string ExtractJsonField(string json, string fieldName)
+    {
+        string pattern = "\"" + fieldName + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"";
+        Match m = Regex.Match(json, pattern);
+        if (!m.Success) return "";
 
-void StopRecording()
-{
-Microphone.End(null);
-recording = false;
+        string val = m.Groups[1].Value;
+        val = val.Replace("\\n", "\n")
+                 .Replace("\\r", "\r")
+                 .Replace("\\t", "\t")
+                 .Replace("\\\"", "\"")
+                 .Replace("\\\\", "\\");
+        return val;
+    }
 
-string path = AI_FOLDER + "question.wav";
-SaveWav(path, clip);
+    // ─────────────────────────────────────────────────────────────────────
+    //  Config loader
+    // ─────────────────────────────────────────────────────────────────────
+    void LoadConfig()
+    {
+        string path = Application.streamingAssetsPath + "/config.json";
 
-UnityEngine.Debug.Log("Saved to: " + path);
+        if (!File.Exists(path))
+        {
+            Debug.LogError("❌ config.json not found at: " + path);
+            return;
+        }
 
-RunSpeechToText();
-}
+        string json = File.ReadAllText(path, Encoding.UTF8);
 
-    //void RunSpeechToText()
-    //{
-    //string python = "python";
-    //string script = AI_FOLDER + "speech_to_text.py";
-    //string audio = AI_FOLDER + "question.wav";
+        ollamaUrl = ExtractJsonField(json, "ollamaUrl");
+        ollamaModel = ExtractJsonField(json, "ollamaModel");
+        characterPromptEn = ExtractJsonField(json, "characterPromptEn");
 
-    //ProcessStartInfo start = new ProcessStartInfo();
-    //start.FileName = python;
-    //start.Arguments = $"-u \"{script}\" \"{audio}\"";
-    //start.UseShellExecute = false;
-    //start.RedirectStandardOutput = true;
-    //start.RedirectStandardError = true;
-    //start.CreateNoWindow = true;
+        Debug.Log("VoiceRecorder: config loaded.");
+        Debug.Log("  ollamaUrl  : " + (string.IsNullOrEmpty(ollamaUrl) ? "MISSING ❌" : ollamaUrl));
+        Debug.Log("  ollamaModel: " + (string.IsNullOrEmpty(ollamaModel) ? "MISSING ❌" : ollamaModel));
+    }
 
-    //Process process = Process.Start(start);
+    // ─────────────────────────────────────────────────────────────────────
+    //  Unity lifecycle
+    // ─────────────────────────────────────────────────────────────────────
 
-    //process.WaitForExit(10000);
+    void Start()
+    {
+        AI_FOLDER = Application.dataPath + "/../AI/";
+        Directory.CreateDirectory(AI_FOLDER);
 
-    //string output = process.StandardOutput.ReadToEnd();
-    //string error = process.StandardError.ReadToEnd();
+        if (dialogueText == null)
+            Debug.LogError("❌ VoiceRecorder: 'dialogueText' is not assigned in the Inspector!");
+        if (instructionText == null)
+            Debug.LogWarning("⚠️ VoiceRecorder: 'instructionText' is not assigned.");
 
-    //string combined = output + "\n" + error;
+        LoadConfig();
+        Debug.Log("VoiceRecorder started. Hold SPACE to record.");
+    }
 
-    //UnityEngine.Debug.Log("PYTHON LOG:\n" + combined);
+    void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.Space))
+        {
+            Debug.Log("START RECORDING");
+            StartRecording();
+        }
 
-    // string userText = "hello test";  // 🔥 TEMP FIX
+        if (Input.GetKeyUp(KeyCode.Space))
+        {
+            Debug.Log("STOP RECORDING");
+            StopRecording();
+        }
+    }
 
-    //        foreach (string line in combined.Split('\n'))
-    //{
-    //    if (line.StartsWith("TRANSCRIPTION:"))
-    //    {
-    //        userText = line.Replace("TRANSCRIPTION:", "").Trim();
-    //        break;
-    //    }
-    //}
-    //UnityEngine.Debug.Log("USER TEXT = [" + userText + "]");//Test 2
-    //UnityEngine.Debug.Log("User said: " + userText);
+    // ─────────────────────────────────────────────────────────────────────
+    //  Recording
+    // ─────────────────────────────────────────────────────────────────────
 
+    void StartRecording()
+    {
+        if (Microphone.devices.Length > 0)
+        {
+            clip = Microphone.Start(null, false, 10, 44100);
+        }
+        else
+        {
+            Debug.LogError("❌ No microphone detected");
+            return;
+        }
 
-    //UnityEngine.Debug.Log("USER TEXT = [" + userText + "]");
+        recording = true;
 
-    //// optional AI test
+        if (instructionText != null)
+            instructionText.gameObject.SetActive(false);
 
-    //dialogueText.text = "You: " + userText + "\nYue Fei is thinking...";
+        SetDialogue("🎙️ Listening...");
+    }
 
+    void StopRecording()
+    {
+        Microphone.End(null);
+        recording = false;
 
-    //        if (!string.IsNullOrEmpty(userText))
-    //{
-    //    StartCoroutine(SendToOllama(userText));
-    //}
-    //}
+        if (clip == null)
+        {
+            Debug.LogError("❌ AudioClip is null after recording.");
+            return;
+        }
+
+        string path = AI_FOLDER + "question.wav";
+        SaveWav(path, clip);
+
+        Debug.Log("Saved WAV to: " + path);
+        SetDialogue("⏳ Processing...");
+        RunSpeechToText();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  STT → Ollama pipeline
+    // ─────────────────────────────────────────────────────────────────────
+
     void RunSpeechToText()
     {
-        string userText = "who are you"; // Eventually link this back to your Python output
-        UnityEngine.Debug.Log("FORCE USER TEXT: " + userText);
+        // ⚠️ Replace this with real Google STT or Whisper integration.
+        // For now uses a hardcoded test string.
+        string userText = "who are you";
+        Debug.Log("⚠️ HARDCODED USER TEXT (replace with real STT): " + userText);
 
-        // Initial UI update
-        dialogueText.text = "You: " + userText + "\n<color=#AAAAAA>Yue Fei is thinking...</color>";
-
+        SetDialogue("You: " + userText + "\n<color=#AAAAAA>Yue Fei is thinking...</color>");
         StartCoroutine(SendToOllama(userText));
     }
 
     IEnumerator SendToOllama(string userText)
     {
-        string url = "http://localhost:11434/api/generate";
+        if (string.IsNullOrEmpty(ollamaUrl))
+        {
+            Debug.LogError("❌ Ollama URL missing. Check config.json.");
+            SetDialogue("❌ Ollama URL missing.");
+            yield break;
+        }
 
-        // Create safe JSON (handles quotes in user text)
+        string url = ollamaUrl + "/api/generate";
+
+        string prompt = string.IsNullOrEmpty(characterPromptEn)
+            ? "You are Yue Fei, a strict ancient general. Speak briefly. Question: "
+            : characterPromptEn;
+
         string safeUserText = userText.Replace("\"", "\\\"");
-        string json = "{\"model\":\"qwen2.5:1.5b\",\"prompt\":\"You are Yue Fei, a strict ancient general. Speak briefly and clearly like a commander. Do NOT ask questions. Question: " + safeUserText + "\",\"stream\":false}";
+        string json = "{\"model\":\"" + ollamaModel + "\",\"prompt\":\"" + prompt + safeUserText + "\",\"stream\":false}";
+
         UnityWebRequest request = new UnityWebRequest(url, "POST");
         byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
         request.uploadHandler = new UploadHandlerRaw(bodyRaw);
@@ -144,121 +204,137 @@ RunSpeechToText();
 
         yield return request.SendWebRequest();
 
-        // 1. IF IT FAILS: Show error and stop
         if (request.result != UnityWebRequest.Result.Success)
         {
-            UnityEngine.Debug.LogError("Ollama Connection Error: " + request.error);
-            dialogueText.text = "You: " + userText + "\n<color=red>[Connection Error]</color>";
-            yield break; // Exit the coroutine here
+            Debug.LogError("❌ Ollama Error: " + request.error);
+            SetDialogue("❌ Ollama not responding. Is it running?");
+            yield break;
         }
 
-        // 2. IF IT SUCCEEDS: Parse and Speak (Place this OUTSIDE the curly braces above)
         string responseJson = request.downloadHandler.text;
         OllamaResponse res = JsonUtility.FromJson<OllamaResponse>(responseJson);
-        string aiText = res.response; // Now aiText is defined!
 
-        dialogueText.text = "You: " + userText + "\nYue Fei: " + aiText;
+        if (res == null || string.IsNullOrEmpty(res.response))
+        {
+            Debug.LogError("❌ Empty response from Ollama.");
+            SetDialogue("❌ No reply from Yue Fei.");
+            yield break;
+        }
 
+        string aiText = res.response;
+        SetDialogue("You: " + userText + "\nYue Fei: " + aiText);
 
-        // Trigger the voice scripts
         GenerateVoice(aiText);
         StartCoroutine(PlayVoice());
-
-        
     }
 
-void GenerateVoice(string text)
-{
-    string filePath = AI_FOLDER + "yuefei_voice.mp3";
+    // ─────────────────────────────────────────────────────────────────────
+    //  TTS (local Python)
+    // ─────────────────────────────────────────────────────────────────────
 
-    // 🔥 DELETE OLD FILE (VERY IMPORTANT)
-    if (File.Exists(filePath))
+    void GenerateVoice(string text)
     {
-        File.Delete(filePath);
+        string filePath = AI_FOLDER + "yuefei_voice.mp3";
+
+        if (File.Exists(filePath))
+            File.Delete(filePath);
+
+        text = text.Replace("\"", "").Replace("\n", " ");
+
+        System.Diagnostics.ProcessStartInfo start = new System.Diagnostics.ProcessStartInfo();
+        start.FileName = "python";
+        start.Arguments = $"\"{AI_FOLDER}tts.py\" \"{text}\"";
+        start.UseShellExecute = false;
+        start.CreateNoWindow = true;
+
+        System.Diagnostics.Process.Start(start);
     }
 
-    ProcessStartInfo start = new ProcessStartInfo();
+    IEnumerator PlayVoice()
+    {
+        string filePath = AI_FOLDER + "yuefei_voice.mp3";
 
-    start.FileName = "python";
-
-    text = text.Replace("\"", "");
-    text = text.Replace("\n", " ");
-
-    start.Arguments = $"\"{AI_FOLDER}tts.py\" \"{text}\"";
-
-    start.UseShellExecute = false;
-    start.CreateNoWindow = true;
-
-    Process.Start(start);
-}
-
-IEnumerator PlayVoice()
-{
-string filePath = AI_FOLDER + "yuefei_voice.mp3";
-
-while (!File.Exists(filePath))
-{
-    yield return new WaitForSeconds(0.5f);
-}
+        float timeout = 10f;
+        float elapsed = 0f;
+        while (!File.Exists(filePath))
+        {
+            yield return new WaitForSeconds(0.5f);
+            elapsed += 0.5f;
+            if (elapsed >= timeout)
+            {
+                Debug.LogError("❌ Timed out waiting for yuefei_voice.mp3");
+                yield break;
+            }
+        }
 
         string path = "file:///" + filePath;
 
-using (UnityWebRequest www = UnityWebRequestMultimedia.GetAudioClip(path, AudioType.MPEG))
-{
-    yield return www.SendWebRequest();
+        using (UnityWebRequest www = UnityWebRequestMultimedia.GetAudioClip(path, AudioType.MPEG))
+        {
+            yield return www.SendWebRequest();
 
-    if (www.result != UnityWebRequest.Result.Success)
-    {
-        UnityEngine.Debug.LogError(www.error);
+            if (www.result != UnityWebRequest.Result.Success)
+            {
+                Debug.LogError("❌ Audio load error: " + www.error);
+            }
+            else
+            {
+                AudioClip audioClip = DownloadHandlerAudioClip.GetContent(www);
+                AudioSource audio = GetComponent<AudioSource>();
+
+                if (audio == null)
+                {
+                    Debug.LogError("❌ No AudioSource on this GameObject!");
+                    yield break;
+                }
+
+                audio.clip = audioClip;
+                audio.Play();
+            }
+        }
     }
-    else
-    {
-        AudioClip clip = DownloadHandlerAudioClip.GetContent(www);
 
-        AudioSource audio = GetComponent<AudioSource>();
-        audio.clip = clip;
-        audio.Play();
+    // ─────────────────────────────────────────────────────────────────────
+    //  WAV saver
+    // ─────────────────────────────────────────────────────────────────────
+
+    void SaveWav(string filepath, AudioClip clip)
+    {
+        var samples = new float[clip.samples];
+        clip.GetData(samples, 0);
+
+        using (FileStream fs = new FileStream(filepath, FileMode.Create))
+        using (BinaryWriter bw = new BinaryWriter(fs))
+        {
+            int sampleCount = samples.Length;
+            int frequency = clip.frequency;
+
+            bw.Write(System.Text.Encoding.UTF8.GetBytes("RIFF"));
+            bw.Write(36 + sampleCount * 2);
+            bw.Write(System.Text.Encoding.UTF8.GetBytes("WAVE"));
+            bw.Write(System.Text.Encoding.UTF8.GetBytes("fmt "));
+            bw.Write(16);
+            bw.Write((short)1);
+            bw.Write((short)1);
+            bw.Write(frequency);
+            bw.Write(frequency * 2);
+            bw.Write((short)2);
+            bw.Write((short)16);
+            bw.Write(System.Text.Encoding.UTF8.GetBytes("data"));
+            bw.Write(sampleCount * 2);
+
+            foreach (var sample in samples)
+            {
+                short value = (short)(sample * short.MaxValue);
+                bw.Write(value);
+            }
+        }
     }
 }
-}
 
-void SaveWav(string filepath, AudioClip clip)
-{
-var samples = new float[clip.samples];
-clip.GetData(samples, 0);
-
-using (FileStream fs = new FileStream(filepath, FileMode.Create))
-using (BinaryWriter bw = new BinaryWriter(fs))
-{
-    int sampleCount = samples.Length;
-    int frequency = clip.frequency;
-
-    bw.Write(System.Text.Encoding.UTF8.GetBytes("RIFF"));
-    bw.Write(36 + sampleCount * 2);
-    bw.Write(System.Text.Encoding.UTF8.GetBytes("WAVE"));
-    bw.Write(System.Text.Encoding.UTF8.GetBytes("fmt "));
-    bw.Write(16);
-    bw.Write((short)1);
-    bw.Write((short)1);
-    bw.Write(frequency);
-    bw.Write(frequency * 2);
-    bw.Write((short)2);
-    bw.Write((short)16);
-    bw.Write(System.Text.Encoding.UTF8.GetBytes("data"));
-    bw.Write(sampleCount * 2);
-
-    foreach (var sample in samples)
-    {
-        short value = (short)(sample * short.MaxValue);
-        bw.Write(value);
-    }
-}
-}
-}
 [System.Serializable]
 public class OllamaResponse
 {
     public string response;
 }
-
 #endif
