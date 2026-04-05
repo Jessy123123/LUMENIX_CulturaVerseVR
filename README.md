@@ -10,7 +10,7 @@
 ---
 
 ## 🏆 Competition Details
-- **Competition:** China International College Students' Innovation Competition (2026) — **Middle East Regional Competition**
+- **Competition:** China International College Students' Innovation Competition (2026) **Middle East Regional Competition**
 - **University:** Universiti Teknologi PETRONAS (UTP)
 - **Group Name:** LUMENIX
 - **Project Name:** CulturaVerse
