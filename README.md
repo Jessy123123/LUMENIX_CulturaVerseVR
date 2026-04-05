@@ -34,7 +34,7 @@ Users can speak to these figures in **Malay, English, or Mandarin Chinese**, rec
 - **👂 Automatic Speech Recognition**: Integration with **Google Cloud Speech-to-Text** with real-time language detection.
 - **🗣️ Dynamic Character Voices**: High-fidelity voices via **Google Cloud Text-to-Speech** (Female standard for Puteri, Male noble for Yue Fei).
 - **🎭 Emotion-Aware NPCs**: Real-time emotion classification (Happy, Sad, Angry, Fearful, Surprised, Neutral) using **Hugging Face NLP models**.
-- **⛈️ Reactive Environments**: The 3D world shifts based on the user's feelings—lighting fades during sadness, and thunder strikes during moments of anger.
+- **⛈️ Reactive Environments**: The 3D world shifts based on the user's feelings such as lighting fades during sadness, and thunder strikes during moments of anger.
 - **🎬 Animated Storytelling**: Custom animations for idle and talking states managed via the **Unity Animator** for realistic presence.
 - **⚙️ Config-Driven Architecture**: centralized `config.json` system ensures easy deployment and security for API tokens.
 
