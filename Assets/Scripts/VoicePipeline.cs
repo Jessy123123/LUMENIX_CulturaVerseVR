@@ -303,7 +303,7 @@ public class VoicePipeline : MonoBehaviour
         isProcessing = true;
         statusMessage = "⏳ Processing...";
         SetDialogue("⏳ Processing your question...");
-        Microphone.End(null);
+        Microphone.End(Microphone.devices[0]);
         Debug.Log("Recording stopped");
         StartCoroutine(SendToSTT());
 #endif
@@ -329,6 +329,32 @@ public class VoicePipeline : MonoBehaviour
         }
 
         return bytes;
+    }
+
+    private byte[] AddWavHeader(byte[] pcmData, int channels, int sampleRate, int bitDepth)
+    {
+        using (MemoryStream ms = new MemoryStream())
+        using (BinaryWriter bw = new BinaryWriter(ms))
+        {
+            int byteRate = sampleRate * channels * bitDepth / 8;
+            short blockAlign = (short)(channels * bitDepth / 8);
+
+            bw.Write(Encoding.UTF8.GetBytes("RIFF"));
+            bw.Write(36 + pcmData.Length);
+            bw.Write(Encoding.UTF8.GetBytes("WAVE"));
+            bw.Write(Encoding.UTF8.GetBytes("fmt "));
+            bw.Write(16);
+            bw.Write((short)1);           // PCM format
+            bw.Write((short)channels);
+            bw.Write(sampleRate);
+            bw.Write(byteRate);
+            bw.Write(blockAlign);
+            bw.Write((short)bitDepth);
+            bw.Write(Encoding.UTF8.GetBytes("data"));
+            bw.Write(pcmData.Length);
+            bw.Write(pcmData);
+            return ms.ToArray();
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -507,14 +533,14 @@ public class VoicePipeline : MonoBehaviour
         if (string.IsNullOrEmpty(replyText))
         {
             Debug.LogWarning("⚠️ ExtractJsonField failed, trying JsonUtility...");
-            try 
+            try
             {
                 OllamaResponse res = JsonUtility.FromJson<OllamaResponse>(raw);
                 if (res != null && !string.IsNullOrEmpty(res.response))
                     replyText = res.response;
             }
             catch { }
-            
+
             if (string.IsNullOrEmpty(replyText))
             {
                 Debug.LogWarning("⚠️ JsonUtility also failed. Using raw reply.");
@@ -569,31 +595,43 @@ public class VoicePipeline : MonoBehaviour
 
     IEnumerator DetectEmotionThenSpeak(string originalText)
     {
-        statusMessage = "🎭 Reading emotion...";
+        statusMessage = "🎭 Reading emotion & generating voice...";
 
         string lockedText = originalText;
-
-        string shortText = lockedText.Length > 200
-            ? lockedText.Substring(0, 200)
-            : lockedText;
-
+        string shortText = lockedText.Length > 200 ? lockedText.Substring(0, 200) : lockedText;
         string dominantEmotion = "neutral";
+        bool emotionDone = false;
 
-        yield return StartCoroutine(
-            emotionDetector.DetectEmotionHF(
-                shortText,
-                huggingFaceApiKey,
-                result => dominantEmotion = result
-            )
-        );
+        // ── Launch emotion detection in parallel (don't yield yet) ──
+        StartCoroutine(emotionDetector.DetectEmotionHF(
+            shortText,
+            huggingFaceApiKey,
+            result =>
+            {
+                dominantEmotion = result;
+                emotionDone = true;
+            }
+        ));
+
+        // ── Launch TTS immediately without waiting for emotion ──
+        Debug.Log("🔒 FINAL TEXT SENT TO TTS: " + lockedText);
+        yield return StartCoroutine(SendToTTS(lockedText));
+
+        // ── Wait for emotion to finish if it hasn't yet ──
+        float timeout = 5f;
+        float elapsed = 0f;
+        while (!emotionDone && elapsed < timeout)
+        {
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        if (!emotionDone)
+            Debug.LogWarning("⚠️ Emotion detection timed out — using fallback: neutral");
 
         Debug.Log("Emotion detected: " + dominantEmotion);
-
         if (bridge != null)
             bridge.OnAIResponseReceived(dominantEmotion);
-
-        Debug.Log("🔒 FINAL TEXT SENT TO TTS: " + lockedText);
-        StartCoroutine(SendToTTS(lockedText));
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -649,7 +687,7 @@ public class VoicePipeline : MonoBehaviour
         {
             input = new GoogleTTSRequest.Input { text = cleanText },
             voice = new GoogleTTSRequest.Voice { languageCode = voiceLanguage, name = voiceName },
-            audioConfig = new GoogleTTSRequest.AudioConfig { audioEncoding = "MP3", speakingRate = ttsSpeakingRate }
+            audioConfig = new GoogleTTSRequest.AudioConfig { audioEncoding = "LINEAR16", speakingRate = ttsSpeakingRate }
         };
 
         string json = JsonUtility.ToJson(ttsRequest);
@@ -685,8 +723,9 @@ public class VoicePipeline : MonoBehaviour
             yield break;
         }
 
-        byte[] mp3Data = System.Convert.FromBase64String(audioBase64);
-        StartCoroutine(PlayMp3(mp3Data, text));
+        byte[] rawPcm = System.Convert.FromBase64String(audioBase64);
+        byte[] wavData = AddWavHeader(rawPcm, 1, 24000, 16);
+        StartCoroutine(PlayWav(wavData, text));
         Debug.Log("🔊 TTS complete for: " + text);
     }
 
@@ -694,15 +733,15 @@ public class VoicePipeline : MonoBehaviour
     //  Step 6 — Play voice on NPC
     // ─────────────────────────────────────────────────────────────────────
 
-    IEnumerator PlayMp3(byte[] mp3Data, string spokenText)
+    IEnumerator PlayWav(byte[] wavData, string spokenText)
     {
         statusMessage = "💬 Yue Fei is speaking...";
 
-        string tempPath = Application.temporaryCachePath + "/yuefei_voice.mp3";
-        File.WriteAllBytes(tempPath, mp3Data);
+        string tempPath = Application.temporaryCachePath + "/yuefei_voice.wav";
+        File.WriteAllBytes(tempPath, wavData);
 
         using (UnityWebRequest audioRequest = UnityWebRequestMultimedia.GetAudioClip(
-                   "file://" + tempPath, AudioType.MPEG))
+                   "file://" + tempPath, AudioType.WAV))
         {
             yield return audioRequest.SendWebRequest();
 

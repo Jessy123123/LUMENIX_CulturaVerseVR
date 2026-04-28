@@ -146,7 +146,7 @@ public class VoiceRecorder : MonoBehaviour
 
     void StopRecording()
     {
-        Microphone.End(null);
+        Microphone.End(Microphone.devices[0]);
         recording = false;
 
         if (clip == null)
@@ -234,7 +234,7 @@ public class VoiceRecorder : MonoBehaviour
 
     void GenerateVoice(string text)
     {
-        string filePath = AI_FOLDER + "yuefei_voice.mp3";
+        string filePath = AI_FOLDER + "yuefei_voice.wav";
 
         if (File.Exists(filePath))
             File.Delete(filePath);
@@ -252,7 +252,7 @@ public class VoiceRecorder : MonoBehaviour
 
     IEnumerator PlayVoice()
     {
-        string filePath = AI_FOLDER + "yuefei_voice.mp3";
+        string filePath = AI_FOLDER + "yuefei_voice.wav";
 
         float timeout = 10f;
         float elapsed = 0f;
@@ -262,14 +262,14 @@ public class VoiceRecorder : MonoBehaviour
             elapsed += 0.5f;
             if (elapsed >= timeout)
             {
-                Debug.LogError("❌ Timed out waiting for yuefei_voice.mp3");
+                Debug.LogError("❌ Timed out waiting for yuefei_voice.wav");
                 yield break;
             }
         }
 
         string path = "file:///" + filePath;
 
-        using (UnityWebRequest www = UnityWebRequestMultimedia.GetAudioClip(path, AudioType.MPEG))
+        using (UnityWebRequest www = UnityWebRequestMultimedia.GetAudioClip(path, AudioType.WAV))
         {
             yield return www.SendWebRequest();
 
