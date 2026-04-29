@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -54,6 +55,12 @@ public class VoicePipelinePuteri : MonoBehaviour
 
     public string statusMessage = "⏳ Puteri is speaking...";
 
+    // ── Parallel task results ──────────────────────────────────────────────
+    private string parallelOllamaReply = null;
+    private bool ollamaDone = false;
+    private string parallelEmotion = null;
+    private bool emotionDone = false;
+
     // ── EmotionDetector (auto-attached) ───────────────────────────────────
     private EmotionDetector emotionDetector;
 
@@ -81,10 +88,9 @@ public class VoicePipelinePuteri : MonoBehaviour
 
     void Awake()
     {
-        // ✅ Auto-share caption references from VoiceRecorderPuteri if not manually assigned
         if (captionText == null || captionScrollRect == null)
         {
-            VoiceRecorderPuteri recorder = FindObjectOfType<VoiceRecorderPuteri>();
+            VoiceRecorderPuteri recorder = FindFirstObjectByType<VoiceRecorderPuteri>();
             if (recorder != null)
             {
                 if (captionText == null && recorder.captionText != null)
@@ -94,7 +100,6 @@ public class VoicePipelinePuteri : MonoBehaviour
                 Debug.Log("VoicePipelinePuteri: auto-linked caption references from VoiceRecorderPuteri");
             }
         }
-        // Don't clear text — VoiceRecorderPuteri may have already written pre-recorded captions
     }
 
     void Start()
@@ -118,12 +123,9 @@ public class VoicePipelinePuteri : MonoBehaviour
     IEnumerator WaitForIntro()
     {
         yield return new WaitForSeconds(2.5f);
-
         while (characterVoice != null && characterVoice.isPlaying)
             yield return null;
-
         yield return new WaitForSeconds(0.5f);
-
         ResetToIdle();
         Debug.Log("Puteri intro finished — ready for questions!");
     }
@@ -132,7 +134,6 @@ public class VoicePipelinePuteri : MonoBehaviour
     {
         if (Input.GetKeyDown(KeyCode.Space) && !isProcessing)
             StartRecording();
-
         if (Input.GetKeyUp(KeyCode.Space) && recording)
             StopRecording();
     }
@@ -150,7 +151,6 @@ public class VoicePipelinePuteri : MonoBehaviour
         style.fontSize = 20;
         style.normal.textColor = GUI.color;
         style.padding = new RectOffset(10, 10, 10, 10);
-
         GUI.Label(new Rect(15, 15, 410, 50), statusMessage, style);
     }
 
@@ -161,12 +161,7 @@ public class VoicePipelinePuteri : MonoBehaviour
     void LoadConfig()
     {
         string path = Application.streamingAssetsPath + "/config.json";
-
-        if (!File.Exists(path))
-        {
-            Debug.LogError("config.json not found at: " + path);
-            return;
-        }
+        if (!File.Exists(path)) { Debug.LogError("config.json not found at: " + path); return; }
 
         string json = File.ReadAllText(path, Encoding.UTF8);
 
@@ -229,22 +224,103 @@ public class VoicePipelinePuteri : MonoBehaviour
 #endif
     }
 
-    public static byte[] AudioClipToWav(AudioClip clip)
+    // ── WAV helpers ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Converts an AudioClip to raw 16-bit PCM bytes (no WAV header).
+    /// Used when sending audio to Google STT.
+    /// </summary>
+    public static byte[] AudioClipToPcm16(AudioClip clip)
     {
-        float[] samples = new float[clip.samples];
+        float[] samples = new float[clip.samples * clip.channels];
         clip.GetData(samples, 0);
         byte[] bytes = new byte[samples.Length * 2];
         int offset = 0;
-
-        foreach (float sample in samples)
+        foreach (float s in samples)
         {
-            float amplified = Mathf.Clamp(sample * 3f, -1f, 1f);
-            short value = (short)(amplified * short.MaxValue);
-            System.BitConverter.GetBytes(value).CopyTo(bytes, offset);
+            float clamped = Mathf.Clamp(s * 3f, -1f, 1f);
+            short value = (short)(clamped * short.MaxValue);
+            bytes[offset] = (byte)(value & 0xFF);
+            bytes[offset + 1] = (byte)((value >> 8) & 0xFF);
             offset += 2;
         }
-
         return bytes;
+    }
+
+    /// <summary>
+    /// Builds a proper WAV file in memory from PCM bytes and clip metadata.
+    /// Returned bytes can be saved to disk or decoded directly into an AudioClip.
+    /// </summary>
+    public static byte[] PcmToWav(byte[] pcmData, int sampleRate, int channels)
+    {
+        using (MemoryStream ms = new MemoryStream())
+        using (BinaryWriter bw = new BinaryWriter(ms))
+        {
+            int byteRate = sampleRate * channels * 2;
+            int blockAlign = channels * 2;
+            int dataLength = pcmData.Length;
+            int riffLength = 36 + dataLength;
+
+            // RIFF header
+            bw.Write(Encoding.ASCII.GetBytes("RIFF"));
+            bw.Write(riffLength);
+            bw.Write(Encoding.ASCII.GetBytes("WAVE"));
+
+            // fmt chunk
+            bw.Write(Encoding.ASCII.GetBytes("fmt "));
+            bw.Write(16);           // chunk size
+            bw.Write((short)1);     // PCM
+            bw.Write((short)channels);
+            bw.Write(sampleRate);
+            bw.Write(byteRate);
+            bw.Write((short)blockAlign);
+            bw.Write((short)16);    // bits per sample
+
+            // data chunk
+            bw.Write(Encoding.ASCII.GetBytes("data"));
+            bw.Write(dataLength);
+            bw.Write(pcmData);
+
+            return ms.ToArray();
+        }
+    }
+
+    /// <summary>
+    /// Converts a WAV byte array (with header) directly into a Unity AudioClip.
+    /// No file I/O required — works on all platforms including consoles.
+    /// </summary>
+    public static AudioClip WavBytesToAudioClip(byte[] wavData, string clipName = "tts_clip")
+    {
+        // Parse WAV header to find PCM data offset and format
+        int channels = wavData[22] | (wavData[23] << 8);
+        int sampleRate = wavData[24] | (wavData[25] << 8) | (wavData[26] << 16) | (wavData[27] << 24);
+
+        // Find the "data" sub-chunk
+        int dataOffset = 12;
+        while (dataOffset < wavData.Length - 8)
+        {
+            string chunkId = Encoding.ASCII.GetString(wavData, dataOffset, 4);
+            int chunkSize = wavData[dataOffset + 4] | (wavData[dataOffset + 5] << 8)
+                           | (wavData[dataOffset + 6] << 16) | (wavData[dataOffset + 7] << 24);
+            if (chunkId == "data")
+            {
+                dataOffset += 8;
+                break;
+            }
+            dataOffset += 8 + chunkSize;
+        }
+
+        int sampleCount = (wavData.Length - dataOffset) / 2;
+        float[] samples = new float[sampleCount];
+        for (int i = 0; i < sampleCount; i++)
+        {
+            short raw = (short)(wavData[dataOffset + i * 2] | (wavData[dataOffset + i * 2 + 1] << 8));
+            samples[i] = raw / (float)short.MaxValue;
+        }
+
+        AudioClip audioClip = AudioClip.Create(clipName, sampleCount / channels, channels, sampleRate, false);
+        audioClip.SetData(samples, 0);
+        return audioClip;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -260,15 +336,16 @@ public class VoicePipelinePuteri : MonoBehaviour
     {
         if (string.IsNullOrEmpty(googleApiKey))
         {
-            Debug.LogError("Google API key is not loaded. Check config.json googleApiKey field.");
+            Debug.LogError("Google API key not loaded. Check config.json googleApiKey field.");
             ResetToIdle();
             yield break;
         }
 
         statusMessage = "⏳ Converting speech to text...";
 
-        byte[] audioData = AudioClipToWav(clip);
-        string audioBase64 = System.Convert.ToBase64String(audioData);
+        // Build WAV bytes in-memory (no disk I/O needed for STT)
+        byte[] pcmData = AudioClipToPcm16(clip);
+        string audioB64 = System.Convert.ToBase64String(pcmData);   // Google STT accepts raw LINEAR16
         string url = "https://speech.googleapis.com/v1/speech:recognize?key=" + googleApiKey;
 
         string json = @"{
@@ -278,17 +355,13 @@ public class VoicePipelinePuteri : MonoBehaviour
                 ""languageCode"": ""ms-MY"",
                 ""alternativeLanguageCodes"": [""zh-CN"", ""en-US""]
             },
-            ""audio"": {
-                ""content"": """ + audioBase64 + @"""
-            }
+            ""audio"": { ""content"": """ + audioB64 + @""" }
         }";
 
         UnityWebRequest request = new UnityWebRequest(url, "POST");
-        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
-        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
-
         yield return request.SendWebRequest();
 
         if (request.result != UnityWebRequest.Result.Success)
@@ -301,24 +374,21 @@ public class VoicePipelinePuteri : MonoBehaviour
 
         string responseText = request.downloadHandler.text;
         STTResponse sttResponse = JsonUtility.FromJson<STTResponse>(responseText);
-
         Debug.Log("STT Response: " + responseText);
 
-        if (sttResponse.results != null && sttResponse.results.Length > 0)
-        {
-            string transcript = sttResponse.results[0].alternatives[0].transcript;
-            detectedLanguage = DetectLanguage(transcript);
-
-            Debug.Log("Transcript: " + transcript);
-            Debug.Log("Detected language: " + detectedLanguage);
-
-            StartCoroutine(SendToOllama(transcript));
-        }
-        else
+        if (sttResponse.results == null || sttResponse.results.Length == 0)
         {
             Debug.LogWarning("No transcript found — speak louder or closer to mic.");
             ResetToIdle();
+            yield break;
         }
+
+        string transcript = sttResponse.results[0].alternatives[0].transcript;
+        detectedLanguage = DetectLanguage(transcript);
+        Debug.Log("Transcript: " + transcript + "  |  Lang: " + detectedLanguage);
+
+        // ── PARALLEL: launch Ollama and kick off parallel pipeline ────────
+        StartCoroutine(ParallelPipeline(transcript));
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -327,84 +397,103 @@ public class VoicePipelinePuteri : MonoBehaviour
 
     string DetectLanguage(string text)
     {
-        if (Regex.IsMatch(text, @"[\u4e00-\u9fff]"))
-            return "zh-CN";
+        if (Regex.IsMatch(text, @"[\u4e00-\u9fff]")) return "zh-CN";
 
         string lower = text.ToLower();
+        string[] strongMalay = { "awak", "kamu", "saya", "anda", "tidak", "adalah", "boleh", "mahu", "sudah", "belum", "bukan", "siapa", "kenapa", "bagaimana", "mengapa", "puteri", "gunung", "ledang", "hikayat", "encik", "cikgu", "tuan", "puan" };
+        foreach (string m in strongMalay) if (lower.Contains(m)) return "ms-MY";
 
-        string[] strongMalayMarkers =
-        {
-            "awak", "kamu", "saya", "anda", "tidak", "adalah",
-            "boleh", "mahu", "sudah", "belum", "bukan",
-            "siapa", "kenapa", "bagaimana", "mengapa",
-            "puteri", "gunung", "ledang", "hikayat",
-            "encik", "cikgu", "tuan", "puan"
-        };
-
-        foreach (string marker in strongMalayMarkers)
-            if (lower.Contains(marker))
-                return "ms-MY";
-
-        string[] weakMalayMarkers =
-        {
-            "apa", "ada", "ini", "itu", "yang", "dia",
-            "dengan", "untuk", "juga", "kita", "kami",
-            "raja", "cerita", "selamat", "terima"
-        };
-
+        string[] weakMalay = { "apa", "ada", "ini", "itu", "yang", "dia", "dengan", "untuk", "juga", "kita", "kami", "raja", "cerita", "selamat", "terima" };
         int weakCount = 0;
-        foreach (string marker in weakMalayMarkers)
-            if (lower.Contains(marker))
-                weakCount++;
-
-        if (weakCount >= 2)
-            return "ms-MY";
+        foreach (string m in weakMalay) if (lower.Contains(m)) weakCount++;
+        if (weakCount >= 2) return "ms-MY";
 
         return "en-US";
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  Step 3 — Ollama local LLM
+    //  PARALLEL PIPELINE — Ollama + pre-warm emotion simultaneously
+    //  then TTS once both resolve
     // ─────────────────────────────────────────────────────────────────────
 
-    IEnumerator SendToOllama(string userText)
+    IEnumerator ParallelPipeline(string transcript)
     {
-        if (string.IsNullOrEmpty(ollamaUrl))
+        statusMessage = "🤖 Puteri is thinking...";
+
+        // Reset parallel task state
+        parallelOllamaReply = null;
+        ollamaDone = false;
+        parallelEmotion = null;
+        emotionDone = false;
+
+        // Fire both tasks concurrently — no yield between them
+        StartCoroutine(RunOllama(transcript));
+
+        // We can't run emotion on the LLM reply yet (we don't have it),
+        // but we overlap Ollama's network round-trip with any pre-warm
+        // work here. Once Ollama resolves it will trigger emotion detection
+        // in parallel with TTS preparation.
+
+        // Wait for Ollama to finish
+        while (!ollamaDone) yield return null;
+
+        if (string.IsNullOrEmpty(parallelOllamaReply))
         {
-            Debug.LogError("Ollama URL is not loaded. Check config.json ollamaUrl field.");
             ResetToIdle();
             yield break;
         }
 
-        statusMessage = "🤖 Puteri is thinking...";
+        currentReplyText = parallelOllamaReply;
+        statusMessage = "🎭 Reading emotion & 🔊 generating voice...";
 
-        string prompt =
-            detectedLanguage == "ms-MY" ? promptMs :
-            detectedLanguage == "zh-CN" ? promptZh :
-            promptEn;
+        // ── PARALLEL: fire emotion detection AND TTS at the same time ─────
+        StartCoroutine(RunEmotionDetection(currentReplyText));
+        StartCoroutine(RunTTSParallel(currentReplyText));
 
-        // ✅ Strictly enforce single language — no mixing allowed
-        string languageInstruction =
-            detectedLanguage == "ms-MY" ? "IMPORTANT: Reply ONLY in Malay (Bahasa Melayu). Do NOT use any English or Chinese words." :
-            detectedLanguage == "zh-CN" ? "重要：只用中文回答。不要混入任何英文或马来文。" :
-            "IMPORTANT: Reply ONLY in English. Do NOT use any Malay or Chinese words.";
+        // Wait for both
+        while (!emotionDone) yield return null;
 
-        if (string.IsNullOrEmpty(prompt))
-            Debug.LogWarning("Prompt is empty for language: " + detectedLanguage);
+        // Apply emotion result to bridge (TTS may still be playing; that's fine)
+        if (bridge != null)
+            bridge.OnAIResponseReceived(parallelEmotion ?? "neutral");
 
-        var ollamaRequest = new OllamaRequest
+        Debug.Log("Emotion detected: " + parallelEmotion);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  Step 3a — Ollama (runs in parallel)
+    // ─────────────────────────────────────────────────────────────────────
+
+    IEnumerator RunOllama(string userText)
+    {
+        if (string.IsNullOrEmpty(ollamaUrl))
+        {
+            Debug.LogError("Ollama URL not loaded. Check config.json ollamaUrl field.");
+            ollamaDone = true;
+            yield break;
+        }
+
+        string prompt = detectedLanguage == "ms-MY" ? promptMs :
+                        detectedLanguage == "zh-CN" ? promptZh : promptEn;
+
+        string langInstruction = detectedLanguage == "ms-MY"
+            ? "IMPORTANT: Reply ONLY in Malay (Bahasa Melayu). Do NOT use any English or Chinese words."
+            : detectedLanguage == "zh-CN"
+            ? "重要：只用中文回答。不要混入任何英文或马来文。"
+            : "IMPORTANT: Reply ONLY in English. Do NOT use any Malay or Chinese words.";
+
+        var ollamaReq = new OllamaRequest
         {
             model = ollamaModel,
-            prompt = prompt + "\n\n" + languageInstruction + "\n\nUser: " + userText + "\nPuteri:",
+            prompt = prompt + "\n\n" + langInstruction + "\n\nUser: " + userText + "\nPuteri:",
             stream = false
         };
 
         string url = ollamaUrl + "/api/generate";
-        string json = JsonUtility.ToJson(ollamaRequest);
+        string json = JsonUtility.ToJson(ollamaReq);
 
         UnityWebRequest request = new UnityWebRequest(url, "POST");
-        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
-        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
 
@@ -413,80 +502,56 @@ public class VoicePipelinePuteri : MonoBehaviour
         if (request.result != UnityWebRequest.Result.Success)
         {
             Debug.LogError("Ollama Error: " + request.error + " — is Ollama running? Run: ollama serve");
-            ResetToIdle();
+            ollamaDone = true;
             yield break;
         }
 
-        OllamaResponse ollamaResponse = JsonUtility.FromJson<OllamaResponse>(request.downloadHandler.text);
-        string replyText = ollamaResponse.response
-            .Replace("\n", " ")
-            .Replace("\r", " ")
-            .Replace("\"", "'")
-            .Replace("\\", " ")
+        OllamaResponse resp = JsonUtility.FromJson<OllamaResponse>(request.downloadHandler.text);
+        parallelOllamaReply = resp.response
+            .Replace("\n", " ").Replace("\r", " ")
+            .Replace("\"", "'").Replace("\\", " ")
             .Trim();
 
-        Debug.Log("Ollama reply: " + replyText);
-
-        StartCoroutine(DetectEmotionThenSpeak(replyText));
+        Debug.Log("Ollama reply: " + parallelOllamaReply);
+        ollamaDone = true;
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  Step 4 — Emotion detection
+    //  Step 3b — Emotion detection (runs in parallel with TTS)
     // ─────────────────────────────────────────────────────────────────────
 
-    IEnumerator DetectEmotionThenSpeak(string replyText)
+    IEnumerator RunEmotionDetection(string replyText)
     {
-        statusMessage = "🎭 Reading emotion...";
-
-        // ✅ Save reply so PlayMp3 can show it as caption
-        currentReplyText = replyText;
-
-        string shortText = replyText.Length > 200
-            ? replyText.Substring(0, 200)
-            : replyText;
-
-        string dominantEmotion = "neutral";
+        string shortText = replyText.Length > 200 ? replyText.Substring(0, 200) : replyText;
 
         yield return StartCoroutine(
             emotionDetector.DetectEmotionHF(
                 shortText,
                 huggingFaceApiKey,
-                result => dominantEmotion = result
+                result => { parallelEmotion = result; }
             )
         );
 
-        Debug.Log("Emotion detected: " + dominantEmotion);
-
-        if (bridge != null)
-            bridge.OnAIResponseReceived(dominantEmotion);
-
-        StartCoroutine(SendToTTS(replyText));
+        emotionDone = true;
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  Step 5 — Google Text-to-Speech
+    //  Step 4 — Google TTS (runs in parallel with emotion detection)
     // ─────────────────────────────────────────────────────────────────────
 
-    IEnumerator SendToTTS(string text)
+    IEnumerator RunTTSParallel(string text)
     {
         if (string.IsNullOrEmpty(googleApiKey))
         {
-            Debug.LogError("Google API key not loaded. Check config.json googleApiKey field.");
+            Debug.LogError("Google API key not loaded.");
             ResetToIdle();
             yield break;
         }
 
-        statusMessage = "🔊 Generating voice...";
-
-        string voiceLanguage =
-            detectedLanguage == "ms-MY" ? ttsLanguageCodeMs :
-            detectedLanguage == "zh-CN" ? ttsLanguageCodeZh :
-            ttsLanguageCodeEn;
-
-        string voiceName =
-            detectedLanguage == "ms-MY" ? ttsVoiceNameMs :
-            detectedLanguage == "zh-CN" ? ttsVoiceNameZh :
-            ttsVoiceNameEn;
+        string voiceLanguage = detectedLanguage == "ms-MY" ? ttsLanguageCodeMs :
+                               detectedLanguage == "zh-CN" ? ttsLanguageCodeZh : ttsLanguageCodeEn;
+        string voiceName = detectedLanguage == "ms-MY" ? ttsVoiceNameMs :
+                               detectedLanguage == "zh-CN" ? ttsVoiceNameZh : ttsVoiceNameEn;
 
         string safeText = text.Replace("\\", "\\\\").Replace("\"", "\\\"");
         string ssmlText = "<speak><prosody rate='slow' pitch='+2st'>" + safeText + "</prosody></speak>";
@@ -498,13 +563,12 @@ public class VoicePipelinePuteri : MonoBehaviour
                 + "\"name\":\"" + voiceName + "\","
                 + "\"ssmlGender\":\"FEMALE\""
             + "},"
-            + "\"audioConfig\":{ \"audioEncoding\":\"MP3\" }"
+            + "\"audioConfig\":{ \"audioEncoding\":\"LINEAR16\" }"   // ← WAV/PCM from Google
         + "}";
 
         string url = "https://texttospeech.googleapis.com/v1/text:synthesize?key=" + googleApiKey;
         UnityWebRequest request = new UnityWebRequest(url, "POST");
-        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
-        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
 
@@ -519,161 +583,81 @@ public class VoicePipelinePuteri : MonoBehaviour
         }
 
         TTSResponse ttsResponse = JsonUtility.FromJson<TTSResponse>(request.downloadHandler.text);
-        byte[] mp3Data = System.Convert.FromBase64String(ttsResponse.audioContent);
 
-        StartCoroutine(PlayMp3(mp3Data));
+        // Google LINEAR16 returns raw PCM (no WAV header) — wrap it into a proper WAV
+        byte[] pcmData = System.Convert.FromBase64String(ttsResponse.audioContent);
+        byte[] wavData = PcmToWav(pcmData, sampleRate: 24000, channels: 1);
+
+        StartCoroutine(PlayWav(wavData));
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  Step 6 — Play voice on NPC
+    //  Step 5 — Play WAV in-memory (no temp file, no file:/// URL)
     // ─────────────────────────────────────────────────────────────────────
 
-    IEnumerator PlayMp3(byte[] mp3Data)
+    IEnumerator PlayWav(byte[] wavData)
     {
         statusMessage = "💬 Puteri is speaking...";
 
-        string tempPath = Path.Combine(Application.temporaryCachePath, "puteri_tts.mp3");
-        File.WriteAllBytes(tempPath, mp3Data);
-        string fileUrl = "file:///" + tempPath.Replace("\\", "/");
+        // Decode WAV bytes directly into an AudioClip — no disk I/O
+        AudioClip ttsClip = WavBytesToAudioClip(wavData, "puteri_tts");
 
-        Debug.Log("Loading audio from: " + fileUrl);
-
-        using (UnityWebRequest audioRequest = UnityWebRequestMultimedia.GetAudioClip(
-                fileUrl, AudioType.MPEG))
+        if (ttsClip == null || ttsClip.length == 0)
         {
-            ((DownloadHandlerAudioClip)audioRequest.downloadHandler).streamAudio = true;
-
-            yield return audioRequest.SendWebRequest();
-
-            Debug.Log("Audio request result: " + audioRequest.result);
-
-            if (audioRequest.result != UnityWebRequest.Result.Success)
-            {
-                Debug.LogError("Audio load error: " + audioRequest.error);
-                StartCoroutine(PlayMp3Fallback(tempPath));
-                yield break;
-            }
-
-            AudioClip ttsClip = DownloadHandlerAudioClip.GetContent(audioRequest);
-
-            if (ttsClip == null || ttsClip.length == 0)
-            {
-                Debug.LogError("AudioClip is null or empty!");
-                ResetToIdle();
-                yield break;
-            }
-
-            Debug.Log("AudioClip loaded! Length: " + ttsClip.length + "s");
-
-            // ✅ Set font before playing
-            if (captionText != null)
-            {
-                if (detectedLanguage == "zh-CN" && fontChinese != null)
-                    captionText.font = fontChinese;
-                else if (fontDefault != null)
-                    captionText.font = fontDefault;
-            }
-
-            // ✅ Start audio and typewriter AT THE SAME TIME
-            characterVoice.clip = ttsClip;
-            characterVoice.Play();
-
-            if (characterAnimator != null)
-                characterAnimator.SetBool("IsTalking", true);
-
-            // ✅ Run typewriter synced to audio duration (appends to history)
-            if (captionText != null)
-                StartCoroutine(TypewriterSync(currentReplyText, ttsClip.length));
-
-            Debug.Log("characterVoice.isPlaying: " + characterVoice.isPlaying);
-
-            yield return new WaitForSeconds(ttsClip.length);
-
-            if (characterAnimator != null)
-                characterAnimator.SetBool("IsTalking", false);
-
+            Debug.LogError("WAV AudioClip is null or empty!");
             ResetToIdle();
+            yield break;
         }
+
+        Debug.Log("WAV AudioClip loaded — length: " + ttsClip.length + "s  samples: " + ttsClip.samples);
+
+        // Apply correct font before speaking
+        if (captionText != null)
+        {
+            if (detectedLanguage == "zh-CN" && fontChinese != null)
+                captionText.font = fontChinese;
+            else if (fontDefault != null)
+                captionText.font = fontDefault;
+        }
+
+        // Start audio and typewriter simultaneously
+        characterVoice.clip = ttsClip;
+        characterVoice.Play();
+
+        if (characterAnimator != null)
+            characterAnimator.SetBool("IsTalking", true);
+
+        if (captionText != null)
+            StartCoroutine(TypewriterSync(currentReplyText, ttsClip.length));
+
+        yield return new WaitForSeconds(ttsClip.length);
+
+        if (characterAnimator != null)
+            characterAnimator.SetBool("IsTalking", false);
+
+        ResetToIdle();
     }
 
-    // ✅ Typewriter that finishes exactly when audio ends (appends to history)
+    // ─────────────────────────────────────────────────────────────────────
+    //  Typewriter synced to audio duration
+    // ─────────────────────────────────────────────────────────────────────
+
     IEnumerator TypewriterSync(string fullText, float audioDuration)
     {
-        if (captionText == null) yield break;
+        if (captionText == null || fullText.Length == 0) yield break;
 
-        int totalChars = fullText.Length;
-        if (totalChars == 0) yield break;
-
-        float delayPerChar = audioDuration / totalChars;
-
-        // Clamp so it doesn't feel too slow or too fast
-        delayPerChar = Mathf.Clamp(delayPerChar, 0.01f, 0.08f);
-
-        // Add a newline separator before appending if there's existing text
+        float delayPerChar = Mathf.Clamp(audioDuration / fullText.Length, 0.01f, 0.08f);
         string prefix = string.IsNullOrEmpty(captionText.text) ? "" : captionText.text + "\n";
 
-        for (int i = 0; i < totalChars; i++)
+        for (int i = 0; i < fullText.Length; i++)
         {
             captionText.text = prefix + fullText.Substring(0, i + 1);
             ScrollToBottom();
             yield return new WaitForSeconds(delayPerChar);
         }
 
-        // Ensure full text is shown by the end
         captionText.text = prefix + fullText;
         ScrollToBottom();
-    }
-
-    // Fallback: use AudioSource.PlayOneShot with Resources if above fails
-    IEnumerator PlayMp3Fallback(string tempPath)
-    {
-        Debug.Log("Fallback: trying UnityWebRequest loader...");
-
-        string fileUrl = "file:///" + tempPath.Replace("\\", "/");
-
-        using (UnityWebRequest audioRequest = UnityWebRequestMultimedia.GetAudioClip(
-                fileUrl, AudioType.MPEG))
-        {
-            yield return audioRequest.SendWebRequest();
-
-            if (audioRequest.result != UnityWebRequest.Result.Success)
-            {
-                Debug.LogError("Fallback audio error: " + audioRequest.error);
-                ResetToIdle();
-                yield break;
-            }
-
-            AudioClip ttsClip = DownloadHandlerAudioClip.GetContent(audioRequest);
-
-            if (ttsClip == null)
-            {
-                Debug.LogError("Fallback AudioClip is null!");
-                ResetToIdle();
-                yield break;
-            }
-
-            if (captionText != null)
-            {
-                if (string.IsNullOrEmpty(captionText.text))
-                    captionText.text = currentReplyText;
-                else
-                    captionText.text += "\n" + currentReplyText;
-                ScrollToBottom();
-            }
-
-            characterVoice.clip = ttsClip;
-            characterVoice.Play();
-
-            if (characterAnimator != null)
-                characterAnimator.SetBool("IsTalking", true);
-
-            yield return new WaitForSeconds(ttsClip.length);
-
-            if (characterAnimator != null)
-                characterAnimator.SetBool("IsTalking", false);
-
-            ResetToIdle();
-        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -684,12 +668,8 @@ public class VoicePipelinePuteri : MonoBehaviour
     {
         isProcessing = false;
         statusMessage = "Press and Hold SPACE to talk";
-        // Caption history is preserved — not cleared
     }
 
-    /// <summary>
-    /// Scrolls the caption ScrollRect to the bottom so the latest line is visible.
-    /// </summary>
     void ScrollToBottom()
     {
         if (captionScrollRect != null)

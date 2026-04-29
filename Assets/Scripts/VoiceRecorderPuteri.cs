@@ -45,51 +45,47 @@ public class VoiceRecorderPuteri : MonoBehaviour
         {
             if (line.clip == null) continue;
 
-            // ✅ Set default font for Malay/English intro lines
             if (captionText != null && fontDefault != null)
                 captionText.font = fontDefault;
 
-            // ✅ Play audio and typewriter simultaneously
-            animator.SetBool("IsTalking", true);
+            // ✅ Null-guarded animator calls
+            if (animator != null)
+                animator.SetBool("IsTalking", true);
+
             audioSource.clip = line.clip;
             audioSource.Play();
 
-            // ✅ Run typewriter in parallel (non-blocking)
+            // Run typewriter in parallel (non-blocking)
             StartCoroutine(TypewriterSync(line.caption, line.clip.length));
 
-            // ✅ Wait for audio to finish (ensures animation stays on for full clip)
-            yield return new WaitWhile(() => audioSource.isPlaying);
+            // Wait using clip length — avoids per-frame lambda allocation from WaitWhile
+            yield return new WaitForSeconds(line.clip.length);
 
-            animator.SetBool("IsTalking", false);
+            if (animator != null)
+                animator.SetBool("IsTalking", false);
 
             yield return new WaitForSeconds(0.5f);
         }
     }
 
-    // ✅ Typewriter synced to audio — appends to scroll history
     IEnumerator TypewriterSync(string fullText, float audioDuration)
     {
-        if (captionText == null) yield break;
+        if (captionText == null || fullText.Length == 0) yield break;
 
-        int totalChars = fullText.Length;
-        if (totalChars == 0) yield break;
+        float delayPerChar = Mathf.Clamp(audioDuration / fullText.Length, 0.01f, 0.08f);
 
-        float delayPerChar = audioDuration / totalChars;
-        delayPerChar = Mathf.Clamp(delayPerChar, 0.01f, 0.08f);
-
-        // ✅ Preserve existing history, append new line
+        // Hoist prefix — computed once, not on every character tick
         string prefix = string.IsNullOrEmpty(captionText.text)
             ? ""
             : captionText.text + "\n";
 
-        for (int i = 0; i < totalChars; i++)
+        for (int i = 0; i < fullText.Length; i++)
         {
             captionText.text = prefix + fullText.Substring(0, i + 1);
             ScrollToBottom();
             yield return new WaitForSeconds(delayPerChar);
         }
 
-        // Guarantee full text is shown
         captionText.text = prefix + fullText;
         ScrollToBottom();
     }
