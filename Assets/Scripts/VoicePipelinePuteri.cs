@@ -29,9 +29,10 @@ public class VoicePipelinePuteri : MonoBehaviour
     public TMP_FontAsset fontChinese;
     public TMP_FontAsset fontDefault;
 
-    // ── Config (loaded from StreamingAssets/config.json) ──────────────────
+    // ── Config (loaded from StreamingAssets/config.json and .env) ──────────────
     private string googleApiKey;
     private string huggingFaceApiKey;
+    private string geminiApiKey;
     private string ollamaUrl;
     private string ollamaModel;
 
@@ -105,6 +106,7 @@ public class VoicePipelinePuteri : MonoBehaviour
     void Start()
     {
         LoadConfig();
+        LoadEnv();
 
         emotionDetector = gameObject.GetComponent<EmotionDetector>();
         if (emotionDetector == null)
@@ -165,8 +167,6 @@ public class VoicePipelinePuteri : MonoBehaviour
 
         string json = File.ReadAllText(path, Encoding.UTF8);
 
-        googleApiKey = ExtractJsonField(json, "googleApiKey");
-        huggingFaceApiKey = ExtractJsonField(json, "huggingFaceApiKey");
         ollamaUrl = ExtractJsonField(json, "ollamaUrl");
         ollamaModel = ExtractJsonField(json, "ollamaModel");
 
@@ -181,13 +181,41 @@ public class VoicePipelinePuteri : MonoBehaviour
         promptZh = ExtractJsonField(json, "puteriPromptZh");
         promptEn = ExtractJsonField(json, "puteriPromptEn");
 
-        Debug.Log("Puteri: config.json loaded.");
-        Debug.Log("  googleApiKey     : " + (string.IsNullOrEmpty(googleApiKey) ? "MISSING ❌" : "OK ✓ (" + googleApiKey.Length + " chars)"));
-        Debug.Log("  huggingFaceApiKey: " + (string.IsNullOrEmpty(huggingFaceApiKey) ? "MISSING ❌" : "OK ✓ (" + huggingFaceApiKey.Length + " chars)"));
-        Debug.Log("  ollamaUrl        : " + (string.IsNullOrEmpty(ollamaUrl) ? "MISSING ❌" : ollamaUrl));
-        Debug.Log("  ollamaModel      : " + (string.IsNullOrEmpty(ollamaModel) ? "MISSING ❌" : ollamaModel));
-        Debug.Log("  promptMs         : " + (string.IsNullOrEmpty(promptMs) ? "MISSING ❌" : "OK ✓ (" + promptMs.Length + " chars)"));
         Debug.Log("  ttsVoiceMs       : " + (string.IsNullOrEmpty(ttsVoiceNameMs) ? "MISSING ❌" : ttsVoiceNameMs));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  .env loader
+    // ─────────────────────────────────────────────────────────────────────
+
+    void LoadEnv()
+    {
+        string path = Application.streamingAssetsPath + "/.env";
+
+        if (!File.Exists(path))
+        {
+            Debug.LogWarning("⚠️ .env file not found at: " + path + ". API keys might be missing.");
+            return;
+        }
+
+        string[] lines = File.ReadAllLines(path, Encoding.UTF8);
+        foreach (string line in lines)
+        {
+            string trimLine = line.Trim();
+            if (string.IsNullOrEmpty(trimLine) || trimLine.StartsWith("#")) continue;
+
+            if (trimLine.StartsWith("GOOGLE_API_KEY="))
+                googleApiKey = trimLine.Substring("GOOGLE_API_KEY=".Length).Trim();
+            else if (trimLine.StartsWith("HUGGINGFACE_API_KEY="))
+                huggingFaceApiKey = trimLine.Substring("HUGGINGFACE_API_KEY=".Length).Trim();
+            else if (trimLine.StartsWith("GEMINI_API_KEY="))
+                geminiApiKey = trimLine.Substring("GEMINI_API_KEY=".Length).Trim();
+        }
+
+        Debug.Log("VoicePipeline: .env loaded.");
+        Debug.Log("  googleApiKey     : " + (string.IsNullOrEmpty(googleApiKey) ? "MISSING ❌" : "OK ✓ (" + googleApiKey.Length + " chars)"));
+        Debug.Log("  geminiApiKey     : " + (string.IsNullOrEmpty(geminiApiKey) ? "MISSING ❌" : "OK ✓ (" + geminiApiKey.Length + " chars)"));
+        Debug.Log("  huggingFaceApiKey: " + (string.IsNullOrEmpty(huggingFaceApiKey) ? "MISSING ❌" : "OK ✓ (" + huggingFaceApiKey.Length + " chars)"));
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -427,7 +455,7 @@ public class VoicePipelinePuteri : MonoBehaviour
         emotionDone = false;
 
         // Fire both tasks concurrently — no yield between them
-        StartCoroutine(RunOllama(transcript));
+        StartCoroutine(RunGeminiWithFallback(transcript));
 
         // We can't run emotion on the LLM reply yet (we don't have it),
         // but we overlap Ollama's network round-trip with any pre-warm
@@ -447,7 +475,7 @@ public class VoicePipelinePuteri : MonoBehaviour
         statusMessage = "🎭 Reading emotion & 🔊 generating voice...";
 
         // ── PARALLEL: fire emotion detection AND TTS at the same time ─────
-        StartCoroutine(RunEmotionDetection(currentReplyText));
+        StartCoroutine(RunEmotionDetection(currentReplyText, transcript));
         StartCoroutine(RunTTSParallel(currentReplyText));
 
         // Wait for both
@@ -461,7 +489,74 @@ public class VoicePipelinePuteri : MonoBehaviour
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  Step 3a — Ollama (runs in parallel)
+    //  Step 3 — Gemini SDK Setup with Ollama Fallback (Runs in parallel)
+    // ─────────────────────────────────────────────────────────────────────
+
+    IEnumerator RunGeminiWithFallback(string userText)
+    {
+        if (string.IsNullOrEmpty(geminiApiKey))
+        {
+            Debug.LogWarning("⚠️ Gemini API key missing. Falling back to Ollama.");
+            yield return StartCoroutine(RunOllama(userText));
+            yield break;
+        }
+
+        string prompt = detectedLanguage == "ms-MY" ? promptMs :
+                        detectedLanguage == "zh-CN" ? promptZh : promptEn;
+
+        string langInstruction = detectedLanguage == "ms-MY"
+            ? "IMPORTANT: Reply ONLY in Malay (Bahasa Melayu). Do NOT use any English or Chinese words."
+            : detectedLanguage == "zh-CN"
+            ? "重要：只用中文回答。不要混入任何英文或马来文。"
+            : "IMPORTANT: Reply ONLY in English. Do NOT use any Malay or Chinese words.";
+
+        string safePrompt = prompt.Replace("\"", "'").Replace("\n", " ").Replace("\r", "");
+        string safeInst = langInstruction.Replace("\"", "'").Replace("\n", " ").Replace("\r", "");
+        string safeUser = userText.Replace("\"", "'").Replace("\n", " ").Replace("\r", "");
+
+        string fullPrompt = safePrompt + " " + safeInst + " User: " + safeUser + " Puteri:";
+
+        string json = "{ \"contents\": [{ \"parts\": [{ \"text\": \"" + fullPrompt + "\" }] }] }";
+        string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + geminiApiKey;
+
+        UnityWebRequest request = new UnityWebRequest(url, "POST");
+        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        request.timeout = 3; // 3 seconds timeout
+
+        yield return request.SendWebRequest();
+
+        if (request.result != UnityWebRequest.Result.Success)
+        {
+            Debug.LogWarning("⚠️ Gemini failed (" + request.error + "). Falling back to Ollama.");
+            yield return StartCoroutine(RunOllama(userText));
+            yield break;
+        }
+
+        string raw = request.downloadHandler.text;
+        string replyText = ExtractJsonField(raw, "text");
+
+        if (string.IsNullOrEmpty(replyText))
+        {
+            Debug.LogWarning("⚠️ Gemini returned empty. Falling back to Ollama.");
+            yield return StartCoroutine(RunOllama(userText));
+            yield break;
+        }
+
+        parallelOllamaReply = replyText.Replace("\\n", " ").Replace("\\\"", "\"").Replace("\\", " ").Replace("*", "").Trim();
+
+        Debug.Log("======================================");
+        Debug.Log(">>> ⚡ LLM USED: GOOGLE GEMINI 2.0 FLASH (Puteri)");
+        Debug.Log(">>> REPLY: " + parallelOllamaReply);
+        Debug.Log("======================================");
+
+        ollamaDone = true;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  Step 3b — Ollama (runs in parallel, Fallback)
     // ─────────────────────────────────────────────────────────────────────
 
     IEnumerator RunOllama(string userText)
@@ -512,7 +607,11 @@ public class VoicePipelinePuteri : MonoBehaviour
             .Replace("\"", "'").Replace("\\", " ")
             .Trim();
 
-        Debug.Log("Ollama reply: " + parallelOllamaReply);
+        Debug.Log("======================================");
+        Debug.Log(">>> 🤖 LLM USED: LOCAL OLLAMA (" + ollamaModel + ") (Puteri)");
+        Debug.Log(">>> REPLY: " + parallelOllamaReply);
+        Debug.Log("======================================");
+
         ollamaDone = true;
     }
 
@@ -520,15 +619,25 @@ public class VoicePipelinePuteri : MonoBehaviour
     //  Step 3b — Emotion detection (runs in parallel with TTS)
     // ─────────────────────────────────────────────────────────────────────
 
-    IEnumerator RunEmotionDetection(string replyText)
+    IEnumerator RunEmotionDetection(string replyText, string userQuestion = null)
     {
-        string shortText = replyText.Length > 200 ? replyText.Substring(0, 200) : replyText;
+        // Analyze USER's question — more reliable than stoic NPC replies
+        string emotionSource = !string.IsNullOrEmpty(userQuestion) ? userQuestion : replyText;
+        string shortText = emotionSource.Length > 200 ? emotionSource.Substring(0, 200) : emotionSource;
+        Debug.Log("🎭 Analysing emotion from: " + shortText);
 
         yield return StartCoroutine(
-            emotionDetector.DetectEmotionHF(
+            emotionDetector.DetectSentimentGoogle(
                 shortText,
-                huggingFaceApiKey,
-                result => { parallelEmotion = result; }
+                googleApiKey,
+                result =>
+                {
+                    parallelEmotion = result;
+                    if (result == "neutral")
+                        Debug.LogWarning("⚠️ Puteri: Emotion came back neutral.");
+                    else
+                        Debug.Log("💯 Puteri Emotion from NLP: " + result);
+                }
             )
         );
 
