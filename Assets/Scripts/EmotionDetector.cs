@@ -12,6 +12,8 @@ using UnityEngine.Networking;
 ///
 /// Returns one of 7 emotions:
 ///   joy | sadness | anger | fear | surprise | disgust | neutral
+///
+/// Added DetectSentimentGoogle for Google Cloud NLP API integration.
 /// </summary>
 public class EmotionDetector : MonoBehaviour
 {
@@ -77,6 +79,103 @@ public class EmotionDetector : MonoBehaviour
         string keywordResult = DetectEmotionKeyword(replyText);
         Debug.Log("EmotionDetector: keyword fallback = " + keywordResult);
         onResult?.Invoke(keywordResult);
+    }
+
+    // ── Google Cloud NLP Sentiment Analysis ────────────────────────────────
+    public IEnumerator DetectSentimentGoogle(
+        string replyText,
+        string googleApiKey,
+        System.Action<string> onResult)
+    {
+        if (string.IsNullOrEmpty(replyText))
+        {
+            onResult?.Invoke("neutral");
+            yield break;
+        }
+
+        if (string.IsNullOrEmpty(googleApiKey))
+        {
+            Debug.LogWarning("EmotionDetector: No Google API key — using keyword fallback.");
+            onResult?.Invoke(DetectEmotionKeyword(replyText));
+            yield break;
+        }
+
+        // Clean text
+        string cleanText = Regex.Replace(replyText, @"[\x00-\x1F\x7F]", " ").Trim();
+        if (cleanText.Length > 500)
+            cleanText = cleanText.Substring(0, 500);
+
+        string safeText = cleanText
+            .Replace("\\", "\\\\")
+            .Replace("\"", "\\\"")
+            .Replace("\n", "\\n")
+            .Replace("\r", "\\r")
+            .Replace("\t", "\\t");
+
+        string url = "https://language.googleapis.com/v1/documents:analyzeSentiment?key=" + googleApiKey;
+        string json = "{ \"document\": { \"type\": \"PLAIN_TEXT\", \"content\": \"" + safeText + "\" }, \"encodingType\": \"UTF8\" }";
+
+        UnityWebRequest request = new UnityWebRequest(url, "POST");
+        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+
+        yield return request.SendWebRequest();
+
+        if (request.result != UnityWebRequest.Result.Success)
+        {
+            Debug.LogWarning("EmotionDetector: Google NLP error — " + request.error + " | " + request.downloadHandler.text);
+            onResult?.Invoke(DetectEmotionKeyword(replyText));
+            yield break;
+        }
+
+        string result = request.downloadHandler.text;
+        
+        // Parse score and magnitude using regex
+        Match scoreMatch = Regex.Match(result, "\"score\"\\s*:\\s*([0-9.eE+\\-]+)");
+        Match magMatch = Regex.Match(result, "\"magnitude\"\\s*:\\s*([0-9.eE+\\-]+)");
+
+        if (scoreMatch.Success && magMatch.Success)
+        {
+            float score = float.Parse(scoreMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+            float mag = float.Parse(magMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+
+            Debug.Log($"EmotionDetector: Google NLP Score={score}, Magnitude={mag}");
+
+            if (score >= 0.1f)
+            {
+                onResult?.Invoke("joy");
+            }
+            else if (score < -0.1f && mag > 0.4f)
+            {
+                onResult?.Invoke("anger");
+            }
+            else if (score < -0.1f && mag <= 0.4f)
+            {
+                onResult?.Invoke("sadness");
+            }
+            else
+            {
+                // Score is between -0.15 and 0.1 (Mixed or Neutral)
+                if (mag > 0.2f)
+                {
+                    string keywordFallback = DetectEmotionKeyword(replyText);
+                    if (keywordFallback != "neutral")
+                    {
+                        Debug.Log($"EmotionDetector: Mixed NLP Score! using Keyword Tie-breaker -> {keywordFallback}");
+                        onResult?.Invoke(keywordFallback);
+                        yield break;
+                    }
+                }
+
+                onResult?.Invoke("neutral");
+            }
+        }
+        else
+        {
+            onResult?.Invoke(DetectEmotionKeyword(replyText));
+        }
     }
 
     // ── HuggingFace request ───────────────────────────────────────────────
@@ -186,120 +285,55 @@ public class EmotionDetector : MonoBehaviour
             return "neutral";
 
         string lower = text.ToLower();
+        
+        int joyScore = CountKeywords(text, lower,
+            "happy", "happiness", "joy", "joyful", "glad", "delight", "delighted", "excited", "wonderful", "beautiful", "love", "lovely", "blessed", "grateful", "thankful", "celebrate", "smile", "laugh", "laughter",
+            "gembira", "bahagia", "suka", "sukacita", "ceria", "seronok", "indah", "syukur", "bersyukur", "cantik", "senyum", "ketawa",
+            "高兴", "快乐", "开心", "喜悦", "幸福", "欢喜", "兴奋", "感激", "感谢", "美好", "欢笑", "爱", "喜欢", "庆祝", "微笑", "欣慰",
+            "高興", "快樂", "開心", "喜悅", "幸福", "歡喜", "興奮", "感激", "感謝", "美好", "歡笑", "愛", "喜歡", "慶祝", "微笑", "欣慰");
 
-        // ── Joy ───────────────────────────────────────────────────────────
-        if (ContainsAny(lower,
-            // English
-            "happy", "happiness", "joy", "joyful", "glad", "delight", "delighted",
-            "excited", "wonderful", "beautiful", "love", "lovely", "blessed",
-            "grateful", "thankful", "celebrate", "smile", "laugh", "laughter",
-            // Malay
-            "gembira", "bahagia", "suka", "sukacita", "ceria", "seronok", "indah",
-            "syukur", "bersyukur", "cantik", "senyum", "ketawa") ||
-            ContainsAny(text,
-            // Chinese Simplified
-            "高兴", "快乐", "开心", "喜悦", "幸福", "欢喜", "兴奋", "感激",
-            "感谢", "美好", "欢笑", "爱", "喜欢", "庆祝", "微笑",
-            // Chinese Traditional
-            "高興", "快樂", "開心", "喜悅", "幸福", "歡喜", "興奮", "感激",
-            "感謝", "美好", "歡笑", "愛", "喜歡", "慶祝", "微笑"))
-            return "joy";
+        int sadScore = CountKeywords(text, lower,
+            "sad", "sadness", "sorrow", "sorrowful", "grief", "grieve", "mourn", "mourning", "tears", "weep", "weeping", "cry", "crying", "heartbroken", "lonely", "loneliness", "despair", "hopeless", "miss", "missing", "loss",
+            "sedih", "duka", "kesedihan", "menangis", "tangis", "rindu", "hilang", "putus asa", "sunyi", "sepi", "kehilangan", "pilu", "sengsara",
+            "悲伤", "伤心", "难过", "哭泣", "哭", "忧愁", "孤独", "绝望", "痛苦", "失落", "思念", "心碎", "哀愁", "泪水", "遗憾", "痛心",
+            "悲傷", "傷心", "難過", "哭泣", "哭", "憂愁", "孤獨", "絕望", "痛苦", "失落", "思念", "心碎", "哀愁", "淚水", "遺憾", "痛心");
 
-        // ── Sadness ───────────────────────────────────────────────────────
-        if (ContainsAny(lower,
-            // English
-            "sad", "sadness", "sorrow", "sorrowful", "grief", "grieve", "mourn",
-            "mourning", "tears", "weep", "weeping", "cry", "crying", "heartbroken",
-            "lonely", "loneliness", "despair", "hopeless", "miss", "missing", "loss",
-            // Malay
-            "sedih", "duka", "kesedihan", "menangis", "tangis", "rindu", "hilang",
-            "putus asa", "sunyi", "sepi", "kehilangan", "pilu", "sengsara") ||
-            ContainsAny(text,
-            // Chinese Simplified
-            "悲伤", "伤心", "难过", "哭泣", "哭", "忧愁", "孤独", "绝望",
-            "痛苦", "失落", "思念", "心碎", "哀愁", "泪水",
-            // Chinese Traditional
-            "悲傷", "傷心", "難過", "哭泣", "哭", "憂愁", "孤獨", "絕望",
-            "痛苦", "失落", "思念", "心碎", "哀愁", "淚水"))
-            return "sadness";
+        int angerScore = CountKeywords(text, lower,
+            "anger", "angry", "furious", "fury", "rage", "enraged", "outraged", "hate", "hatred", "hostile", "mad", "upset", "frustrat", "betrayed", "ambitious", "ambition", "determined", "determination", "passionate", "passion",
+            "marah", "kemarahan", "geram", "benci", "dendam", "murka", "berang", "jengkel", "naik angin", "melenting", "bersemangat", "semangat", "berazam", "azam",
+            "愤怒", "生气", "发火", "恼火", "愤慨", "怒火", "仇恨", "憎恨", "暴怒", "气愤", "不满", "讨厌", "志气", "抱负", "野心", "雄心", "决心", "激情", "坚定",
+            "憤怒", "生氣", "發火", "惱火", "憤慨", "怒火", "仇恨", "憎恨", "暴怒", "氣憤", "不滿", "討厭", "志氣", "抱負", "野心", "雄心", "決心", "激情", "堅定");
 
-        // ── Anger (includes Passion / Ambition / Determination) ────────────────────
-        if (ContainsAny(lower,
-            // English
-            "anger", "angry", "furious", "fury", "rage", "enraged", "outraged",
-            "hate", "hatred", "hostile", "mad", "upset", "frustrat", "betrayed",
-            "ambitious", "ambition", "determined", "determination", "passionate", "passion",
-            // Malay
-            "marah", "kemarahan", "geram", "benci", "dendam", "murka", "berang",
-            "jengkel", "naik angin", "melenting", "bersemangat", "semangat", "berazam", "azam",
-            // Chinese Simplified
-            "愤怒", "生气", "发火", "恼火", "愤慨", "怒火", "仇恨", "憎恨",
-            "暴怒", "气愤", "不满", "讨厌", "志气", "抱负", "野心", "雄心", "决心", "激情", "坚定",
-            // Chinese Traditional
-            "憤怒", "生氣", "發火", "惱火", "憤慨", "怒火", "仇恨", "憎恨",
-            "暴怒", "氣憤", "不滿", "討厭", "志氣", "抱負", "野心", "雄心", "決心", "激情", "堅定"))
-            return "anger";
+        int fearScore = CountKeywords(text, lower,
+            "fear", "afraid", "frighten", "frightened", "scared", "terrified", "terror", "horror", "horrified", "dread", "panic", "anxious", "anxiety", "worry", "worried", "nervous", "danger", "dangerous", "threat",
+            "takut", "ketakutan", "gerun", "ngeri", "seram", "panik", "bimbang", "risau", "cemas", "bahaya", "ancaman",
+            "害怕", "恐惧", "恐慌", "惊恐", "担心", "忧虑", "紧张", "危险", "威胁", "战战兢兢", "毛骨悚然",
+            "害怕", "恐懼", "恐慌", "驚恐", "擔心", "憂慮", "緊張", "危險", "威脅", "戰戰兢兢", "毛骨悚然");
 
-        // ── Fear ──────────────────────────────────────────────────────────
-        if (ContainsAny(lower,
-            // English
-            "fear", "afraid", "frighten", "frightened", "scared", "terrified",
-            "terror", "horror", "horrified", "dread", "panic", "anxious", "anxiety",
-            "worry", "worried", "nervous", "danger", "dangerous", "threat",
-            // Malay
-            "takut", "ketakutan", "gerun", "ngeri", "seram", "panik", "bimbang",
-            "risau", "cemas", "bahaya", "ancaman") ||
-            ContainsAny(text,
-            // Chinese Simplified
-            "害怕", "恐惧", "恐慌", "惊恐", "担心", "忧虑", "紧张", "危险",
-            "威胁", "战战兢兢", "毛骨悚然",
-            // Chinese Traditional
-            "害怕", "恐懼", "恐慌", "驚恐", "擔心", "憂慮", "緊張", "危險",
-            "威脅", "戰戰兢兢", "毛骨悚然"))
-            return "fear";
+        // Priority logic for mixed emotions:
+        // Anger/Sadness (Negative) > Joy/Fear
+        int maxScore = 0;
+        string result = "neutral";
 
-        // ── Surprise ──────────────────────────────────────────────────────
-        if (ContainsAny(lower,
-            // English
-            "surprise", "surprised", "shocking", "shocked", "amazed", "amazement",
-            "astonished", "astonishment", "unexpected", "suddenly", "unbelievable",
-            // Malay
-            "terkejut", "hairan", "kagum", "ajaib", "tidak sangka",
-            "mengejutkan", "luar biasa") ||
-            ContainsAny(text,
-            // Chinese Simplified
-            "惊讶", "惊喜", "震惊", "吃惊", "意外", "没想到", "不可思议",
-            "突然", "出乎意料",
-            // Chinese Traditional
-            "驚訝", "驚喜", "震驚", "吃驚", "意外", "沒想到", "不可思議",
-            "突然", "出乎意料"))
-            return "surprise";
+        if (angerScore > maxScore) { maxScore = angerScore; result = "anger"; }
+        if (sadScore > maxScore) { maxScore = sadScore; result = "sadness"; }
+        
+        // If joy ties with negative emotions, negative emotion wins (priority).
+        // Only override if joy is STRICTLY greater.
+        if (joyScore > maxScore) { maxScore = joyScore; result = "joy"; }
+        if (fearScore > maxScore) { maxScore = fearScore; result = "fear"; }
 
-        // ── Disgust ───────────────────────────────────────────────────────
-        if (ContainsAny(lower,
-            // English
-            "disgust", "disgusting", "repulsed", "repulsive", "revolting", "gross",
-            "horrible", "vile", "awful", "terrible", "nasty", "wicked", "shameful",
-            // Malay
-            "jijik", "hodoh", "buruk", "keji", "hina", "menjijikkan", "kotor",
-            "busuk", "teruk", "jahat", "zalim") ||
-            ContainsAny(text,
-            // Chinese Simplified
-            "恶心", "厌恶", "反感", "恶劣", "丑陋", "肮脏", "令人作呕",
-            "可耻", "卑鄙", "糟糕",
-            // Chinese Traditional
-            "噁心", "厭惡", "反感", "惡劣", "醜陋", "骯髒", "令人作嘔",
-            "可恥", "卑鄙", "糟糕"))
-            return "disgust";
-
-        return "neutral";
+        return maxScore > 0 ? result : "neutral";
     }
 
-    private bool ContainsAny(string text, params string[] keywords)
+    private int CountKeywords(string text, string lowerText, params string[] keywords)
     {
+        int count = 0;
         foreach (string k in keywords)
-            if (text.Contains(k))
-                return true;
-        return false;
+        {
+            if (lowerText.Contains(k.ToLower()) || text.Contains(k))
+                count++;
+        }
+        return count;
     }
 }

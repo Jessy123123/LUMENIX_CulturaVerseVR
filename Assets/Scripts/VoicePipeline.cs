@@ -50,9 +50,10 @@ public class VoicePipeline : MonoBehaviour
     [TextArea(3, 5)]
     public string introText = "怒发冲冠，凭阑处、潇潇雨歇。抬望眼，仰天长啸，壮怀激烈。三十功名尘与土，八千里路云和月。莫等闲，白了少年头，空悲切。";
 
-    // ── Config (loaded from StreamingAssets/config.json) ──────────────────
+    // ── Config (loaded from StreamingAssets/config.json and .env) ──────────────
     private string googleApiKey;
     private string huggingFaceApiKey;
+    private string geminiApiKey;
     private string ollamaUrl;
     private string ollamaModel;
 
@@ -140,6 +141,7 @@ public class VoicePipeline : MonoBehaviour
             Debug.LogWarning("⚠️ VoicePipeline: 'bridge' (AI_bridge_YueFei) is not assigned — emotion bridge will be skipped.");
 
         LoadConfig();
+        LoadEnv();
 
         emotionDetector = gameObject.GetComponent<EmotionDetector>();
         if (emotionDetector == null)
@@ -234,8 +236,6 @@ public class VoicePipeline : MonoBehaviour
 
         string json = File.ReadAllText(path, Encoding.UTF8);
 
-        googleApiKey = ExtractJsonField(json, "googleApiKey");
-        huggingFaceApiKey = ExtractJsonField(json, "huggingFaceApiKey");
         ollamaUrl = ExtractJsonField(json, "ollamaUrl");
         ollamaModel = ExtractJsonField(json, "ollamaModel");
 
@@ -251,12 +251,41 @@ public class VoicePipeline : MonoBehaviour
         characterPromptMs = ExtractJsonField(json, "characterPromptMs");
 
         Debug.Log("VoicePipeline: config.json loaded.");
-        Debug.Log("  googleApiKey     : " + (string.IsNullOrEmpty(googleApiKey) ? "MISSING ❌" : "OK ✓ (" + googleApiKey.Length + " chars)"));
-        Debug.Log("  huggingFaceApiKey: " + (string.IsNullOrEmpty(huggingFaceApiKey) ? "MISSING ❌" : "OK ✓ (" + huggingFaceApiKey.Length + " chars)"));
-        Debug.Log("  ollamaUrl        : " + (string.IsNullOrEmpty(ollamaUrl) ? "MISSING ❌" : ollamaUrl));
-        Debug.Log("  ollamaModel      : " + (string.IsNullOrEmpty(ollamaModel) ? "MISSING ❌" : ollamaModel));
-        Debug.Log("  promptZh         : " + (string.IsNullOrEmpty(characterPromptZh) ? "MISSING ❌" : "OK ✓ (" + characterPromptZh.Length + " chars)"));
         Debug.Log("  ttsVoiceZh       : " + (string.IsNullOrEmpty(ttsVoiceNameZh) ? "MISSING ❌" : ttsVoiceNameZh));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  .env loader
+    // ─────────────────────────────────────────────────────────────────────
+
+    void LoadEnv()
+    {
+        string path = Application.streamingAssetsPath + "/.env";
+
+        if (!File.Exists(path))
+        {
+            Debug.LogWarning("⚠️ .env file not found at: " + path + ". API keys might be missing.");
+            return;
+        }
+
+        string[] lines = File.ReadAllLines(path, Encoding.UTF8);
+        foreach (string line in lines)
+        {
+            string trimLine = line.Trim();
+            if (string.IsNullOrEmpty(trimLine) || trimLine.StartsWith("#")) continue;
+
+            if (trimLine.StartsWith("GOOGLE_API_KEY="))
+                googleApiKey = trimLine.Substring("GOOGLE_API_KEY=".Length).Trim();
+            else if (trimLine.StartsWith("HUGGINGFACE_API_KEY="))
+                huggingFaceApiKey = trimLine.Substring("HUGGINGFACE_API_KEY=".Length).Trim();
+            else if (trimLine.StartsWith("GEMINI_API_KEY="))
+                geminiApiKey = trimLine.Substring("GEMINI_API_KEY=".Length).Trim();
+        }
+
+        Debug.Log("VoicePipeline: .env loaded.");
+        Debug.Log("  googleApiKey     : " + (string.IsNullOrEmpty(googleApiKey) ? "MISSING ❌" : "OK ✓ (" + googleApiKey.Length + " chars)"));
+        Debug.Log("  geminiApiKey     : " + (string.IsNullOrEmpty(geminiApiKey) ? "MISSING ❌" : "OK ✓ (" + geminiApiKey.Length + " chars)"));
+        Debug.Log("  huggingFaceApiKey: " + (string.IsNullOrEmpty(huggingFaceApiKey) ? "MISSING ❌" : "OK ✓ (" + huggingFaceApiKey.Length + " chars)"));
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -425,7 +454,7 @@ public class VoicePipeline : MonoBehaviour
             Debug.Log("Detected language: " + detectedLanguage);
 
             SetDialogue("You: " + transcript + "\n<color=#AAAAAA>Yue Fei is thinking...</color>");
-            StartCoroutine(SendToOllama(transcript));
+            StartCoroutine(SendToGeminiWithFallback(transcript));
         }
         else
         {
@@ -477,7 +506,85 @@ public class VoicePipeline : MonoBehaviour
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  Step 3 — Ollama local LLM
+    //  Step 3 — Gemini API (Fast Cloud LLM) -> Fallback to Ollama
+    // ─────────────────────────────────────────────────────────────────────
+
+    IEnumerator SendToGeminiWithFallback(string userText)
+    {
+        if (string.IsNullOrEmpty(geminiApiKey))
+        {
+            Debug.LogWarning("⚠️ Gemini API key missing. Falling back to Ollama.");
+            yield return StartCoroutine(SendToOllama(userText));
+            yield break;
+        }
+
+        statusMessage = "🧠 Yue Fei is thinking (Gemini)...";
+
+        string prompt =
+            detectedLanguage == "zh-CN" ? characterPromptZh :
+            detectedLanguage == "ms-MY" ? characterPromptMs :
+            characterPromptEn;
+
+        string langInstruction = detectedLanguage == "ms-MY"
+            ? "IMPORTANT: Reply ONLY in Malay (Bahasa Melayu). Do NOT use any English or Chinese words."
+            : detectedLanguage == "zh-CN"
+            ? "重要：只用中文回答。不要混入任何英文或马来文。"
+            : "IMPORTANT: Reply ONLY in English. Do NOT use any Malay or Chinese words.";
+
+        // Strip non-JSON safe characters
+        string safePrompt = prompt.Replace("\"", "'").Replace("\n", " ").Replace("\r", "");
+        string safeInst = langInstruction.Replace("\"", "'").Replace("\n", " ").Replace("\r", "");
+        string safeUser = userText.Replace("\"", "'").Replace("\n", " ").Replace("\r", "");
+
+        string fullPrompt = safePrompt + " " + safeInst + " User: " + safeUser + " Yue Fei:";
+
+        string json = "{ \"contents\": [{ \"parts\": [{ \"text\": \"" + fullPrompt + "\" }] }] }";
+
+        string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + geminiApiKey;
+
+        UnityWebRequest request = new UnityWebRequest(url, "POST");
+        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+        request.SetRequestHeader("Content-Type", "application/json");
+        request.timeout = 3; // 3 seconds timeout for fast VR response
+
+        yield return request.SendWebRequest();
+
+        if (request.result != UnityWebRequest.Result.Success)
+        {
+            Debug.LogWarning("⚠️ Gemini failed (" + request.error + "). Falling back to Ollama.");
+            yield return StartCoroutine(SendToOllama(userText));
+            yield break;
+        }
+
+        string raw = request.downloadHandler.text;
+        string replyText = ExtractJsonField(raw, "text");
+
+        if (string.IsNullOrEmpty(replyText))
+        {
+            Debug.LogWarning("⚠️ Gemini returned empty. Falling back to Ollama.");
+            yield return StartCoroutine(SendToOllama(userText));
+            yield break;
+        }
+
+        // Clean up markdown
+        replyText = replyText.Replace("\\n", " ").Replace("\\\"", "\"").Replace("\\", "").Replace("*", "").Trim();
+
+        Debug.Log("======================================");
+        Debug.Log(">>> ⚡ LLM USED: GOOGLE GEMINI 2.0 FLASH");
+        Debug.Log(">>> REPLY: " + replyText);
+        Debug.Log("======================================");
+
+        lastUserText = userText;
+        SetDialogue("You: " + userText + "\nYue Fei: <color=#AAAAAA>...</color>");
+
+        // Detect emotion from USER's question (more reliable than AI's stoic reply)
+        StartCoroutine(DetectEmotionThenSpeak(replyText, userText));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  Step 3b — Ollama local LLM (Fallback)
     // ─────────────────────────────────────────────────────────────────────
 
     IEnumerator SendToOllama(string userText)
@@ -490,12 +597,18 @@ public class VoicePipeline : MonoBehaviour
             yield break;
         }
 
-        statusMessage = "🤖 Yue Fei is thinking...";
+        statusMessage = "🤖 Yue Fei is thinking (Local Ollama)...";
 
         string prompt =
             detectedLanguage == "zh-CN" ? characterPromptZh :
             detectedLanguage == "ms-MY" ? characterPromptMs :
             characterPromptEn;
+
+        string langInstruction = detectedLanguage == "ms-MY"
+            ? "IMPORTANT: Reply ONLY in Malay (Bahasa Melayu). Do NOT use any English or Chinese words."
+            : detectedLanguage == "zh-CN"
+            ? "重要：只用中文回答。不要混入任何英文或马来文。"
+            : "IMPORTANT: Reply ONLY in English. Do NOT use any Malay or Chinese words.";
 
         if (string.IsNullOrEmpty(prompt))
             Debug.LogWarning("⚠️ Prompt is empty for language: " + detectedLanguage);
@@ -503,7 +616,7 @@ public class VoicePipeline : MonoBehaviour
         var ollamaRequest = new OllamaRequest
         {
             model = ollamaModel,
-            prompt = prompt + "\n\nUser: " + userText + "\nYue Fei:",
+            prompt = prompt + "\n\n" + langInstruction + "\n\nUser: " + userText + "\nYue Fei:",
             stream = false
         };
 
@@ -554,6 +667,11 @@ public class VoicePipeline : MonoBehaviour
             .Replace("\\", "")
             .Trim();
 
+        Debug.Log("======================================");
+        Debug.Log(">>> 🤖 LLM USED: LOCAL OLLAMA (" + ollamaModel + ")");
+        Debug.Log(">>> REPLY: " + replyText);
+        Debug.Log("======================================");
+
         if (string.IsNullOrEmpty(replyText))
         {
             Debug.LogWarning("⚠️ Reply text is empty after parsing!");
@@ -585,7 +703,8 @@ public class VoicePipeline : MonoBehaviour
         lastUserText = userText;
         SetDialogue("You: " + userText + "\nYue Fei: <color=#AAAAAA>...</color>");
 
-        StartCoroutine(DetectEmotionThenSpeak(replyText));
+        // Detect emotion from USER's question (more reliable than AI's stoic reply)
+        StartCoroutine(DetectEmotionThenSpeak(replyText, userText));
         Debug.Log("🧠 FINAL REPLY: " + replyText);
     }
 
@@ -593,22 +712,31 @@ public class VoicePipeline : MonoBehaviour
     //  Step 4 — Emotion detection
     // ─────────────────────────────────────────────────────────────────────
 
-    IEnumerator DetectEmotionThenSpeak(string originalText)
+    IEnumerator DetectEmotionThenSpeak(string originalText, string userQuestion = null)
     {
         statusMessage = "🎭 Reading emotion & generating voice...";
 
         string lockedText = originalText;
         string shortText = lockedText.Length > 200 ? lockedText.Substring(0, 200) : lockedText;
+
+        // Analyze the USER's question for emotion — more reliable than the NPC's stoic reply
+        string emotionSource = !string.IsNullOrEmpty(userQuestion) ? userQuestion : shortText;
+        Debug.Log("🎭 Analysing emotion from: " + emotionSource);
+
         string dominantEmotion = "neutral";
         bool emotionDone = false;
 
         // ── Launch emotion detection in parallel (don't yield yet) ──
-        StartCoroutine(emotionDetector.DetectEmotionHF(
-            shortText,
-            huggingFaceApiKey,
+        StartCoroutine(emotionDetector.DetectSentimentGoogle(
+            emotionSource,
+            googleApiKey,
             result =>
             {
                 dominantEmotion = result;
+                if (result == "neutral")
+                    Debug.LogWarning("⚠️ Emotion came back neutral — Google NLP may have returned Score=0 or failed. Check that 'Cloud Natural Language API' is enabled in your Google Cloud project.");
+                else
+                    Debug.Log("💯 Emotion detected from Google NLP: " + result);
                 emotionDone = true;
             }
         ));

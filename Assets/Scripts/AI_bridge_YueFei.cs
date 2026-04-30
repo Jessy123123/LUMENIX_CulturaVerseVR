@@ -34,25 +34,21 @@ public class AI_bridge_YueFei : MonoBehaviour
     {
         switch (raw.ToLower().Trim())
         {
-            case "joy":
-            case "normal":
-            case "neutral":
-                return "Normal";
-
-            case "sadness":
-            case "sad":
-            case "disgust":
-                return "Sad";
-
             case "anger":
             case "angry":
                 return "Angry";
 
+            case "sadness":
+            case "sad":
+            case "disgust":
             case "fear":
             case "fearful":
-            case "surprise":
-                return "Spiritual";
+                return "Sad";
 
+            case "joy":
+            case "normal":
+            case "neutral":
+            case "surprise":
             default:
                 return "Normal";
         }
@@ -60,13 +56,12 @@ public class AI_bridge_YueFei : MonoBehaviour
 
     // ─────────────────────────────────────────────
     //  Manual test keys (Play mode only)
-    //  G = Sad   A = Angry   S = Spiritual   N = Normal
+    //  A = Angry   S = Sad   N = Normal
     // ─────────────────────────────────────────────
     void Update()
     {
-        if (Input.GetKeyDown(KeyCode.G)) OnAIResponseReceived("sadness");
-        if (Input.GetKeyDown(KeyCode.A)) OnAIResponseReceived("anger");
-        if (Input.GetKeyDown(KeyCode.S)) OnAIResponseReceived("surprise");
-        if (Input.GetKeyDown(KeyCode.N)) OnAIResponseReceived("neutral");
+        if (Input.GetKeyDown(KeyCode.A)) OnAIResponseReceived("anger");     // A -> Angry
+        if (Input.GetKeyDown(KeyCode.S)) OnAIResponseReceived("sadness");   // S -> Sad
+        if (Input.GetKeyDown(KeyCode.N)) OnAIResponseReceived("neutral");   // N -> Normal
     }
 }
