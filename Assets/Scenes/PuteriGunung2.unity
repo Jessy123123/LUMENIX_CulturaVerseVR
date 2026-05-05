@@ -15,17 +15,17 @@ RenderSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 10
   m_Fog: 0
-  m_FogColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
-  m_FogMode: 3
-  m_FogDensity: 0.01
+  m_FogColor: {r: 0.4565682, g: 0.45824647, b: 0.5660378, a: 1}
+  m_FogMode: 2
+  m_FogDensity: 0.001
   m_LinearFogStart: 0
   m_LinearFogEnd: 300
   m_AmbientSkyColor: {r: 0.212, g: 0.227, b: 0.259, a: 1}
-  m_AmbientEquatorColor: {r: 0.114, g: 0.125, b: 0.133, a: 1}
-  m_AmbientGroundColor: {r: 0.047, g: 0.043, b: 0.035, a: 1}
-  m_AmbientIntensity: 1
+  m_AmbientEquatorColor: {r: 0.4311143, g: 0.48942685, b: 0.5283019, a: 1}
+  m_AmbientGroundColor: {r: 0.6886792, g: 0.6832651, b: 0.6724368, a: 1}
+  m_AmbientIntensity: 0.8
   m_AmbientMode: 0
-  m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
+  m_SubtractiveShadowColor: {r: 0.21542364, g: 0.27994412, b: 0.4433962, a: 1}
   m_SkyboxMaterial: {fileID: 10304, guid: 0000000000000000f000000000000000, type: 0}
   m_HaloStrength: 0.5
   m_FlareStrength: 1
@@ -35,7 +35,7 @@ RenderSettings:
   m_DefaultReflectionMode: 0
   m_DefaultReflectionResolution: 128
   m_ReflectionBounces: 1
-  m_ReflectionIntensity: 1
+  m_ReflectionIntensity: 0.5
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 0}
   m_UseRadianceAmbientProbe: 0
@@ -530,6 +530,55 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: -20, y: -20}
   m_Pivot: {x: 0.5, y: 0.5}
+--- !u!1 &507791189
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 507791190}
+  - component: {fileID: 507791191}
+  m_Layer: 0
+  m_Name: Post-Processing_Global
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &507791190
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 507791189}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: -333.06763, y: 102.34784, z: 68.738144}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1887924545}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &507791191
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 507791189}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 172515602e62fb746b5d573b38a5fe58, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Unity.RenderPipelines.Core.Runtime::UnityEngine.Rendering.Volume
+  m_IsGlobal: 1
+  priority: 0
+  blendDistance: 0
+  weight: 1
+  sharedProfile: {fileID: 11400000, guid: a3b5ce312fd275e4f9703c4ba98a637e, type: 2}
 --- !u!1 &511130353
 GameObject:
   m_ObjectHideFlags: 0
@@ -545,7 +594,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!4 &511130354
 Transform:
   m_ObjectHideFlags: 0
@@ -1190,6 +1239,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ec01ddf7b98ac0946b1549afa97aeb34, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::EmotionDetector
+  currentEmotion: neutral
 --- !u!1001 &901398063
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -1257,6 +1307,10 @@ PrefabInstance:
     - target: {fileID: 919132149155446097, guid: b7561e8d42803a94a926539c53b2317a, type: 3}
       propertyPath: m_Name
       value: white horse1
+      objectReference: {fileID: 0}
+    - target: {fileID: 919132149155446097, guid: b7561e8d42803a94a926539c53b2317a, type: 3}
+      propertyPath: m_StaticEditorFlags
+      value: 2147483647
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
@@ -1703,8 +1757,8 @@ Transform:
   m_GameObject: {fileID: 1287998308}
   serializedVersion: 2
   m_LocalRotation: {x: 0.5, y: -0.5, z: 0.5, w: 0.5}
-  m_LocalPosition: {x: -100, y: 85, z: 80}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalPosition: {x: -90, y: 85, z: 80}
+  m_LocalScale: {x: 5, y: 5, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1833472033}
@@ -1798,7 +1852,7 @@ ParticleSystem:
   m_GameObject: {fileID: 1287998308}
   serializedVersion: 8
   lengthInSec: 5
-  simulationSpeed: 1
+  simulationSpeed: 2
   stopAction: 0
   cullingMode: 0
   ringBufferMode: 0
@@ -1925,7 +1979,7 @@ ParticleSystem:
     startSpeed:
       serializedVersion: 2
       minMaxState: 0
-      scalar: 15
+      scalar: 1
       minScalar: 5
       maxCurve:
         serializedVersion: 2
@@ -1979,7 +2033,7 @@ ParticleSystem:
       serializedVersion: 2
       minMaxState: 0
       minColor: {r: 1, g: 1, b: 1, a: 1}
-      maxColor: {r: 0.16131186, g: 0.16131186, b: 0.23584908, a: 1}
+      maxColor: {r: 0.24870951, g: 0.24870951, b: 0.254717, a: 1}
       maxGradient:
         serializedVersion: 2
         key0: {r: 1, g: 1, b: 1, a: 1}
@@ -2367,7 +2421,7 @@ ParticleSystem:
     gravityModifier:
       serializedVersion: 2
       minMaxState: 0
-      scalar: 10
+      scalar: 15
       minScalar: 0
       maxCurve:
         serializedVersion: 2
@@ -2679,7 +2733,7 @@ ParticleSystem:
     rateOverDistance:
       serializedVersion: 2
       minMaxState: 0
-      scalar: 0
+      scalar: 10
       minScalar: 0
       maxCurve:
         serializedVersion: 2
@@ -6653,6 +6707,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: Gunung
       objectReference: {fileID: 0}
+    - target: {fileID: 919132149155446097, guid: 31a8fab9ca89f384a861a995470b9c97, type: 3}
+      propertyPath: m_StaticEditorFlags
+      value: 0
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -6824,13 +6882,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1823355523}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalRotation: {x: 0.7911842, y: -0.1458355, z: -0.09796048, w: -0.58580136}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalScale: {x: 5, y: 5, z: 5}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 1833472033}
-  m_LocalEulerAnglesHint: {x: 50, y: -30, z: 0}
+  m_LocalEulerAnglesHint: {x: -72.848, y: 536.919, z: -156.838}
 --- !u!114 &1823355525
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -6870,14 +6928,14 @@ Light:
   m_Enabled: 1
   serializedVersion: 12
   m_Type: 1
-  m_Color: {r: 0.2912513, g: 0.31961995, b: 0.8018868, a: 1}
-  m_Intensity: 5
+  m_Color: {r: 0.072140254, g: 0.044010334, b: 0.4056604, a: 1}
+  m_Intensity: 4
   m_Range: 10
   m_SpotAngle: 30
   m_InnerSpotAngle: 21.80208
   m_CookieSize2D: {x: 0.5, y: 0.5}
   m_Shadows:
-    m_Type: 2
+    m_Type: 1
     m_Resolution: -1
     m_CustomResolution: -1
     m_Strength: 1
@@ -6908,14 +6966,14 @@ Light:
   m_RenderMode: 0
   m_CullingMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 16
   m_RenderingLayerMask: 1
-  m_Lightmapping: 4
+  m_Lightmapping: 2
   m_LightShadowCasterMode: 0
   m_AreaSize: {x: 1, y: 1}
-  m_BounceIntensity: 1
+  m_BounceIntensity: 0
   m_ColorTemperature: 12368
-  m_UseColorTemperature: 1
+  m_UseColorTemperature: 0
   m_BoundingSphereOverride: {x: 0, y: 0, z: 0, w: 0}
   m_UseBoundingSphereOverride: 0
   m_UseViewFrustumForShadowCasterCull: 1
@@ -7049,6 +7107,7 @@ GameObject:
   - component: {fileID: 1887924544}
   - component: {fileID: 1887924546}
   - component: {fileID: 1887924547}
+  - component: {fileID: 1887924548}
   m_Layer: 0
   m_Name: EnvironmentManager
   m_TagString: Untagged
@@ -7068,12 +7127,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7770d502ce105f74e9269115d3969bb1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::EnvironmentManager
+  volume: {fileID: 507791191}
   normalEnvironment: {fileID: 1508320179}
   gloomyEnvironment: {fileID: 1833472032}
   angryEnvironment: {fileID: 511130353}
   rainParticles: {fileID: 1287998311}
   angrySkybox: {fileID: 2100000, guid: 67bacd6cc3b8190468b01d49b17e3d68, type: 2}
   normalSkybox: {fileID: 10304, guid: 0000000000000000f000000000000000, type: 0}
+  sadSkybox: {fileID: 2100000, guid: 817e99cd4a65d09439c537704143bb6a, type: 2}
   lightningLight: {fileID: 297988562}
 --- !u!4 &1887924545
 Transform:
@@ -7087,7 +7148,8 @@ Transform:
   m_LocalPosition: {x: -273.20142, y: -471.7958, z: 151.23592}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 507791190}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!95 &1887924546
@@ -7125,6 +7187,19 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AIBridgePuteri
   envManager: {fileID: 1887924544}
+--- !u!114 &1887924548
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1887924543}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ec01ddf7b98ac0946b1549afa97aeb34, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::EmotionDetector
+  currentEmotion: neutral
 --- !u!1001 &1998280266
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -7342,7 +7417,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 1, y: 0}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: -16.999878, y: -0.00048065186}
+  m_AnchoredPosition: {x: -16.999878, y: -0.0006637573}
   m_SizeDelta: {x: 20, y: -17}
   m_Pivot: {x: 1, y: 1}
 --- !u!114 &2059929626
@@ -7389,7 +7464,7 @@ MonoBehaviour:
   m_HandleRect: {fileID: 1067238534}
   m_Direction: 2
   m_Value: 1
-  m_Size: 0.9999837
+  m_Size: 0.9999656
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:

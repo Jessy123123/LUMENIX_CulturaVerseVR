@@ -17,11 +17,13 @@ using UnityEngine.Networking;
 /// </summary>
 public class EmotionDetector : MonoBehaviour
 {
+    public string currentEmotion = "neutral";
     private const string HF_MODEL_URL =
         "https://router.huggingface.co/hf-inference/models/j-hartmann/emotion-english-distilroberta-base";
 
     private static readonly string[] ValidEmotions =
         { "joy", "sadness", "anger", "fear", "surprise", "disgust", "neutral" };
+    
 
     // ── Public API ────────────────────────────────────────────────────────
 
@@ -47,6 +49,7 @@ public class EmotionDetector : MonoBehaviour
     {
         if (string.IsNullOrEmpty(replyText))
         {
+            currentEmotion = "neutral";
             onResult?.Invoke("neutral");
             yield break;
         }
@@ -63,6 +66,7 @@ public class EmotionDetector : MonoBehaviour
 
             if (hfResult != null)
             {
+                currentEmotion = hfResult;
                 Debug.Log("EmotionDetector: HuggingFace = " + hfResult);
                 onResult?.Invoke(hfResult);
                 yield break;
@@ -78,6 +82,7 @@ public class EmotionDetector : MonoBehaviour
         // ── Fallback: keyword-based ───────────────────────────────────────
         string keywordResult = DetectEmotionKeyword(replyText);
         Debug.Log("EmotionDetector: keyword fallback = " + keywordResult);
+        currentEmotion = keywordResult;
         onResult?.Invoke(keywordResult);
     }
 
@@ -90,6 +95,7 @@ public class EmotionDetector : MonoBehaviour
         if (string.IsNullOrEmpty(replyText))
         {
             onResult?.Invoke("neutral");
+            currentEmotion= "neutral";
             yield break;
         }
 
@@ -97,6 +103,7 @@ public class EmotionDetector : MonoBehaviour
         {
             Debug.LogWarning("EmotionDetector: No Google API key — using keyword fallback.");
             onResult?.Invoke(DetectEmotionKeyword(replyText));
+            currentEmotion = DetectEmotionKeyword(replyText);
             yield break;
         }
 
@@ -126,7 +133,9 @@ public class EmotionDetector : MonoBehaviour
         if (request.result != UnityWebRequest.Result.Success)
         {
             Debug.LogWarning("EmotionDetector: Google NLP error — " + request.error + " | " + request.downloadHandler.text);
-            onResult?.Invoke(DetectEmotionKeyword(replyText));
+            string keywordFallback = DetectEmotionKeyword(replyText);
+            onResult?.Invoke(keywordFallback);
+            currentEmotion = keywordFallback;
             yield break;
         }
 
@@ -145,14 +154,17 @@ public class EmotionDetector : MonoBehaviour
 
             if (score >= 0.1f)
             {
+                currentEmotion = "joy";
                 onResult?.Invoke("joy");
             }
             else if (score < -0.1f && mag > 0.4f)
             {
+                currentEmotion = "anger";
                 onResult?.Invoke("anger");
             }
             else if (score < -0.1f && mag <= 0.4f)
             {
+                currentEmotion = "sadness";
                 onResult?.Invoke("sadness");
             }
             else
@@ -165,16 +177,20 @@ public class EmotionDetector : MonoBehaviour
                     {
                         Debug.Log($"EmotionDetector: Mixed NLP Score! using Keyword Tie-breaker -> {keywordFallback}");
                         onResult?.Invoke(keywordFallback);
+                        currentEmotion = keywordFallback;
                         yield break;
                     }
                 }
-
+                
+                currentEmotion = "neutral";
                 onResult?.Invoke("neutral");
             }
         }
         else
         {
             onResult?.Invoke(DetectEmotionKeyword(replyText));
+                currentEmotion = DetectEmotionKeyword(replyText);
+                Debug.LogWarning("EmotionDetector: Google NLP parse error — missing score/magnitude. Using keyword fallback.");
         }
     }
 
