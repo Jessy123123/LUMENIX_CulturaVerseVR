@@ -387,6 +387,7 @@ public class VoicePipelinePuteri : MonoBehaviour
         }";
 
         UnityWebRequest request = new UnityWebRequest(url, "POST");
+        request.SetRequestHeader("Content-Type", "application/json");
         request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
