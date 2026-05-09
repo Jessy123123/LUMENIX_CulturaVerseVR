@@ -1,5 +1,5 @@
 {
-  "ollamaUrl": "https://startle-antiquity-quarry.ngrok-free.dev/chat",
+  "ollamaUrl": "https://startle-antiquity-quarry.ngrok-free.dev",
   "ollamaModel": "qwen2.5:1.5b",
   "ttsLanguageCodeZh": "cmn-CN",
   "ttsVoiceNameZh": "cmn-CN-Standard-B",

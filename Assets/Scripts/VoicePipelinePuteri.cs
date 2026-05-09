@@ -254,10 +254,6 @@ public class VoicePipelinePuteri : MonoBehaviour
 
     // ── WAV helpers ───────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Converts an AudioClip to raw 16-bit PCM bytes (no WAV header).
-    /// Used when sending audio to Google STT.
-    /// </summary>
     public static byte[] AudioClipToPcm16(AudioClip clip)
     {
         float[] samples = new float[clip.samples * clip.channels];
@@ -275,10 +271,6 @@ public class VoicePipelinePuteri : MonoBehaviour
         return bytes;
     }
 
-    /// <summary>
-    /// Builds a proper WAV file in memory from PCM bytes and clip metadata.
-    /// Returned bytes can be saved to disk or decoded directly into an AudioClip.
-    /// </summary>
     public static byte[] PcmToWav(byte[] pcmData, int sampleRate, int channels)
     {
         using (MemoryStream ms = new MemoryStream())
@@ -289,22 +281,19 @@ public class VoicePipelinePuteri : MonoBehaviour
             int dataLength = pcmData.Length;
             int riffLength = 36 + dataLength;
 
-            // RIFF header
             bw.Write(Encoding.ASCII.GetBytes("RIFF"));
             bw.Write(riffLength);
             bw.Write(Encoding.ASCII.GetBytes("WAVE"));
 
-            // fmt chunk
             bw.Write(Encoding.ASCII.GetBytes("fmt "));
-            bw.Write(16);           // chunk size
-            bw.Write((short)1);     // PCM
+            bw.Write(16);
+            bw.Write((short)1);
             bw.Write((short)channels);
             bw.Write(sampleRate);
             bw.Write(byteRate);
             bw.Write((short)blockAlign);
-            bw.Write((short)16);    // bits per sample
+            bw.Write((short)16);
 
-            // data chunk
             bw.Write(Encoding.ASCII.GetBytes("data"));
             bw.Write(dataLength);
             bw.Write(pcmData);
@@ -313,28 +302,18 @@ public class VoicePipelinePuteri : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Converts a WAV byte array (with header) directly into a Unity AudioClip.
-    /// No file I/O required — works on all platforms including consoles.
-    /// </summary>
     public static AudioClip WavBytesToAudioClip(byte[] wavData, string clipName = "tts_clip")
     {
-        // Parse WAV header to find PCM data offset and format
         int channels = wavData[22] | (wavData[23] << 8);
         int sampleRate = wavData[24] | (wavData[25] << 8) | (wavData[26] << 16) | (wavData[27] << 24);
 
-        // Find the "data" sub-chunk
         int dataOffset = 12;
         while (dataOffset < wavData.Length - 8)
         {
             string chunkId = Encoding.ASCII.GetString(wavData, dataOffset, 4);
             int chunkSize = wavData[dataOffset + 4] | (wavData[dataOffset + 5] << 8)
-                           | (wavData[dataOffset + 6] << 16) | (wavData[dataOffset + 7] << 24);
-            if (chunkId == "data")
-            {
-                dataOffset += 8;
-                break;
-            }
+                             | (wavData[dataOffset + 6] << 16) | (wavData[dataOffset + 7] << 24);
+            if (chunkId == "data") { dataOffset += 8; break; }
             dataOffset += 8 + chunkSize;
         }
 
@@ -371,9 +350,8 @@ public class VoicePipelinePuteri : MonoBehaviour
 
         statusMessage = "⏳ Converting speech to text...";
 
-        // Build WAV bytes in-memory (no disk I/O needed for STT)
         byte[] pcmData = AudioClipToPcm16(clip);
-        string audioB64 = System.Convert.ToBase64String(pcmData);   // Google STT accepts raw LINEAR16
+        string audioB64 = System.Convert.ToBase64String(pcmData);
         string url = "https://speech.googleapis.com/v1/speech:recognize?key=" + googleApiKey;
 
         string json = @"{
@@ -390,7 +368,6 @@ public class VoicePipelinePuteri : MonoBehaviour
         request.SetRequestHeader("Content-Type", "application/json");
         request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
         request.downloadHandler = new DownloadHandlerBuffer();
-        request.SetRequestHeader("Content-Type", "application/json");
         yield return request.SendWebRequest();
 
         if (request.result != UnityWebRequest.Result.Success)
@@ -416,7 +393,6 @@ public class VoicePipelinePuteri : MonoBehaviour
         detectedLanguage = DetectLanguage(transcript);
         Debug.Log("Transcript: " + transcript + "  |  Lang: " + detectedLanguage);
 
-        // ── PARALLEL: launch Ollama and kick off parallel pipeline ────────
         StartCoroutine(ParallelPipeline(transcript));
     }
 
@@ -441,29 +417,20 @@ public class VoicePipelinePuteri : MonoBehaviour
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  PARALLEL PIPELINE — Ollama + pre-warm emotion simultaneously
-    //  then TTS once both resolve
+    //  PARALLEL PIPELINE
     // ─────────────────────────────────────────────────────────────────────
 
     IEnumerator ParallelPipeline(string transcript)
     {
         statusMessage = "🤖 Puteri is thinking...";
 
-        // Reset parallel task state
         parallelOllamaReply = null;
         ollamaDone = false;
         parallelEmotion = null;
         emotionDone = false;
 
-        // Fire both tasks concurrently — no yield between them
         StartCoroutine(RunGeminiWithFallback(transcript));
 
-        // We can't run emotion on the LLM reply yet (we don't have it),
-        // but we overlap Ollama's network round-trip with any pre-warm
-        // work here. Once Ollama resolves it will trigger emotion detection
-        // in parallel with TTS preparation.
-
-        // Wait for Ollama to finish
         while (!ollamaDone) yield return null;
 
         if (string.IsNullOrEmpty(parallelOllamaReply))
@@ -475,14 +442,11 @@ public class VoicePipelinePuteri : MonoBehaviour
         currentReplyText = parallelOllamaReply;
         statusMessage = "🎭 Reading emotion & 🔊 generating voice...";
 
-        // ── PARALLEL: fire emotion detection AND TTS at the same time ─────
         StartCoroutine(RunEmotionDetection(currentReplyText, transcript));
         StartCoroutine(RunTTSParallel(currentReplyText));
 
-        // Wait for both
         while (!emotionDone) yield return null;
 
-        // Apply emotion result to bridge (TTS may still be playing; that's fine)
         if (bridge != null)
             bridge.OnAIResponseReceived(parallelEmotion ?? "neutral");
 
@@ -490,7 +454,7 @@ public class VoicePipelinePuteri : MonoBehaviour
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  Step 3 — Gemini SDK Setup with Ollama Fallback (Runs in parallel)
+    //  Step 3 — Gemini with Ollama fallback
     // ─────────────────────────────────────────────────────────────────────
 
     IEnumerator RunGeminiWithFallback(string userText)
@@ -516,16 +480,14 @@ public class VoicePipelinePuteri : MonoBehaviour
         string safeUser = userText.Replace("\"", "'").Replace("\n", " ").Replace("\r", "");
 
         string fullPrompt = safePrompt + " " + safeInst + " User: " + safeUser + " Puteri:";
-
         string json = "{ \"contents\": [{ \"parts\": [{ \"text\": \"" + fullPrompt + "\" }] }] }";
         string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + geminiApiKey;
 
         UnityWebRequest request = new UnityWebRequest(url, "POST");
-        byte[] bodyRaw = Encoding.UTF8.GetBytes(json);
-        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
-        request.timeout = 3; // 3 seconds timeout
+        request.timeout = 3;
 
         yield return request.SendWebRequest();
 
@@ -557,7 +519,7 @@ public class VoicePipelinePuteri : MonoBehaviour
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  Step 3b — Ollama (runs in parallel, Fallback)
+    //  Step 3b — Ollama fallback
     // ─────────────────────────────────────────────────────────────────────
 
     IEnumerator RunOllama(string userText)
@@ -617,12 +579,11 @@ public class VoicePipelinePuteri : MonoBehaviour
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  Step 3b — Emotion detection (runs in parallel with TTS)
+    //  Step 3c — Emotion detection (parallel with TTS)
     // ─────────────────────────────────────────────────────────────────────
 
     IEnumerator RunEmotionDetection(string replyText, string userQuestion = null)
     {
-        // Analyze USER's question — more reliable than stoic NPC replies
         string emotionSource = !string.IsNullOrEmpty(userQuestion) ? userQuestion : replyText;
         string shortText = emotionSource.Length > 200 ? emotionSource.Substring(0, 200) : emotionSource;
         Debug.Log("🎭 Analysing emotion from: " + shortText);
@@ -646,7 +607,7 @@ public class VoicePipelinePuteri : MonoBehaviour
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  Step 4 — Google TTS (runs in parallel with emotion detection)
+    //  Step 4 — Google TTS (parallel with emotion detection)
     // ─────────────────────────────────────────────────────────────────────
 
     IEnumerator RunTTSParallel(string text)
@@ -673,7 +634,7 @@ public class VoicePipelinePuteri : MonoBehaviour
                 + "\"name\":\"" + voiceName + "\","
                 + "\"ssmlGender\":\"FEMALE\""
             + "},"
-            + "\"audioConfig\":{ \"audioEncoding\":\"LINEAR16\" }"   // ← WAV/PCM from Google
+            + "\"audioConfig\":{ \"audioEncoding\":\"LINEAR16\" }"
         + "}";
 
         string url = "https://texttospeech.googleapis.com/v1/text:synthesize?key=" + googleApiKey;
@@ -694,7 +655,6 @@ public class VoicePipelinePuteri : MonoBehaviour
 
         TTSResponse ttsResponse = JsonUtility.FromJson<TTSResponse>(request.downloadHandler.text);
 
-        // Google LINEAR16 returns raw PCM (no WAV header) — wrap it into a proper WAV
         byte[] pcmData = System.Convert.FromBase64String(ttsResponse.audioContent);
         byte[] wavData = PcmToWav(pcmData, sampleRate: 24000, channels: 1);
 
@@ -702,14 +662,13 @@ public class VoicePipelinePuteri : MonoBehaviour
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  Step 5 — Play WAV in-memory (no temp file, no file:/// URL)
+    //  Step 5 — Play WAV in-memory
     // ─────────────────────────────────────────────────────────────────────
 
     IEnumerator PlayWav(byte[] wavData)
     {
         statusMessage = "💬 Puteri is speaking...";
 
-        // Decode WAV bytes directly into an AudioClip — no disk I/O
         AudioClip ttsClip = WavBytesToAudioClip(wavData, "puteri_tts");
 
         if (ttsClip == null || ttsClip.length == 0)
@@ -730,7 +689,6 @@ public class VoicePipelinePuteri : MonoBehaviour
                 captionText.font = fontDefault;
         }
 
-        // Start audio and typewriter simultaneously
         characterVoice.clip = ttsClip;
         characterVoice.Play();
 
@@ -749,7 +707,7 @@ public class VoicePipelinePuteri : MonoBehaviour
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    //  Typewriter synced to audio duration
+    //  Typewriter synced to audio — FIXED SCROLLING
     // ─────────────────────────────────────────────────────────────────────
 
     IEnumerator TypewriterSync(string fullText, float audioDuration)
@@ -757,16 +715,26 @@ public class VoicePipelinePuteri : MonoBehaviour
         if (captionText == null || fullText.Length == 0) yield break;
 
         float delayPerChar = Mathf.Clamp(audioDuration / fullText.Length, 0.01f, 0.08f);
-        string prefix = string.IsNullOrEmpty(captionText.text) ? "" : captionText.text + "\n";
+
+        // Separate each conversation turn with a blank line
+        string prefix = string.IsNullOrEmpty(captionText.text)
+            ? ""
+            : captionText.text + "\n\n";
 
         for (int i = 0; i < fullText.Length; i++)
         {
             captionText.text = prefix + fullText.Substring(0, i + 1);
+
+            // Rebuild layout every character so Content height stays current
+            LayoutRebuilder.ForceRebuildLayoutImmediate(captionText.rectTransform);
+
             ScrollToBottom();
             yield return new WaitForSeconds(delayPerChar);
         }
 
+        // Ensure final text + layout is correct
         captionText.text = prefix + fullText;
+        LayoutRebuilder.ForceRebuildLayoutImmediate(captionText.rectTransform);
         ScrollToBottom();
     }
 
@@ -780,12 +748,17 @@ public class VoicePipelinePuteri : MonoBehaviour
         statusMessage = "Press and Hold SPACE to talk";
     }
 
+    // FIXED: rebuild Content rect before setting scroll position
     void ScrollToBottom()
     {
-        if (captionScrollRect != null)
-        {
-            Canvas.ForceUpdateCanvases();
-            captionScrollRect.verticalNormalizedPosition = 0f;
-        }
+        if (captionScrollRect == null) return;
+
+        Canvas.ForceUpdateCanvases();
+
+        // Rebuild the Content RectTransform so its height reflects new text
+        LayoutRebuilder.ForceRebuildLayoutImmediate(
+            (RectTransform)captionScrollRect.content);
+
+        captionScrollRect.verticalNormalizedPosition = 0f;
     }
 }
