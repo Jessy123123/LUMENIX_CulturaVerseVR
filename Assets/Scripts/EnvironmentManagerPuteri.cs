@@ -67,6 +67,7 @@ public class EnvironmentManagerPuteri : MonoBehaviour
             ApplyGloomyEffect(1f);
             if (rainParticles != null) rainParticles.Play();
             RenderSettings.skybox = sadSkybox; // Changes the sky color
+            DynamicGI.UpdateEnvironment();
         }
         else if (emotion == "Angry")
         {
