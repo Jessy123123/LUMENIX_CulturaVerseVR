@@ -5,6 +5,7 @@ using UnityEngine.Rendering.Universal; // Use .HighDefinition if using HDRP
  
 public class EnvironmentManager_YueFei : MonoBehaviour
 {
+    public EmotionDetector emotionDetector;
     public GameObject normalEnvironment;
     public GameObject gloomyEnvironment;
     public GameObject angryEnvironment;
@@ -12,30 +13,52 @@ public class EnvironmentManager_YueFei : MonoBehaviour
  
     public Material angrySkybox;
     public Material normalSkybox;
+    public Material sadSkybox;
  
     public Light lightningLight; // Assign this in the Inspector
- 
+    string lastEmotion = "";
+
     // Call this function when you want a flash
-    public void TriggerThunder()
+    //public void TriggerThunder()
+    //{
+    //    StartCoroutine(FlashLightning());
+    //}
+
+    //IEnumerator FlashLightning()
+    //{
+    //    lightningLight.enabled = true;
+    //    yield return new WaitForSeconds(0.1f); // Quick flicker
+    //    lightningLight.enabled = false;
+    //}
+
+    void Start()
     {
-        StartCoroutine(FlashLightning());
+        emotionDetector = GetComponent<EmotionDetector>();
     }
- 
-    IEnumerator FlashLightning()
+
+    void Update()
     {
-        lightningLight.enabled = true;
-        yield return new WaitForSeconds(0.1f); // Quick flicker
-        lightningLight.enabled = false;
+        if (emotionDetector == null) return;
+
+        string current = emotionDetector.currentEmotion;
+
+        if (current != lastEmotion)
+        {
+            UpdateEnvironment(current);
+            lastEmotion = current;
+        }
     }
- 
     public void UpdateEnvironment(string emotion)
     {
         if (emotion == "Sad")
         {
             normalEnvironment.SetActive(false);
             gloomyEnvironment.SetActive(true);
- 
+            angryEnvironment.SetActive(false);
             if (rainParticles != null) rainParticles.Play();
+            RenderSettings.skybox = sadSkybox; // Changes the sky color
+            DynamicGI.UpdateEnvironment();
+
         }
         else if (emotion == "Angry")
         {
@@ -44,9 +67,8 @@ public class EnvironmentManager_YueFei : MonoBehaviour
             angryEnvironment.SetActive(true);
             if (rainParticles != null) rainParticles.Stop();
             RenderSettings.skybox = angrySkybox; // Changes the sky color
-        
             DynamicGI.UpdateEnvironment();       // Refreshes the lighting
-            TriggerThunder(); // Flash lightning when angry
+            //TriggerThunder(); // Flash lightning when angry
         }
         else
         {
