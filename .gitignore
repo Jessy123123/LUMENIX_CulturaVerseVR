@@ -1,3 +1,12 @@
+# Claude Code internal files
+.claude/
+
+# API Keys - never commit these
+.env
+*.env
+Assets/StreamingAssets/.env
+Assets/StreamingAssets/.env.meta
+
 .vs/
 obj/
 Library/
@@ -45,6 +54,8 @@ Assets/StreamingAssets/config.json.meta
 *.log
 *.tmp
 *.utmp/
+
+.claude
 
 Mobile_BackUpThisFolder_ButDontShipItWithYourGame/
 *BurstDebugInformation*
