@@ -1,3 +1,9 @@
+# API Keys - never commit these
+.env
+*.env
+Assets/StreamingAssets/.env
+Assets/StreamingAssets/.env.meta
+
 .vs/
 obj/
 Library/

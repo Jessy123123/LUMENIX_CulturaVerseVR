@@ -32,7 +32,9 @@ public class VoicePipelinePuteri : MonoBehaviour
     // ── Config (loaded from StreamingAssets/config.json and .env) ──────────────
     private string googleApiKey;
     private string huggingFaceApiKey;
-    private string geminiApiKey;
+    private string groqApiKey;
+    private float lastGroqRequestTime = -10f; // cooldown tracker
+    private const float GroqCooldownSeconds = 2f; // min 2s between requests (Groq: 30 RPM)
     private string ollamaUrl;
     private string ollamaModel;
 
@@ -208,13 +210,13 @@ public class VoicePipelinePuteri : MonoBehaviour
                 googleApiKey = trimLine.Substring("GOOGLE_API_KEY=".Length).Trim();
             else if (trimLine.StartsWith("HUGGINGFACE_API_KEY="))
                 huggingFaceApiKey = trimLine.Substring("HUGGINGFACE_API_KEY=".Length).Trim();
-            else if (trimLine.StartsWith("GEMINI_API_KEY="))
-                geminiApiKey = trimLine.Substring("GEMINI_API_KEY=".Length).Trim();
+            else if (trimLine.StartsWith("GROQ_API_KEY="))
+                groqApiKey = trimLine.Substring("GROQ_API_KEY=".Length).Trim();
         }
 
-        Debug.Log("VoicePipeline: .env loaded.");
+        Debug.Log("VoicePipelinePuteri: .env loaded.");
         Debug.Log("  googleApiKey     : " + (string.IsNullOrEmpty(googleApiKey) ? "MISSING ❌" : "OK ✓ (" + googleApiKey.Length + " chars)"));
-        Debug.Log("  geminiApiKey     : " + (string.IsNullOrEmpty(geminiApiKey) ? "MISSING ❌" : "OK ✓ (" + geminiApiKey.Length + " chars)"));
+        Debug.Log("  groqApiKey       : " + (string.IsNullOrEmpty(groqApiKey) ? "MISSING ❌" : "OK ✓ (" + groqApiKey.Length + " chars)"));
         Debug.Log("  huggingFaceApiKey: " + (string.IsNullOrEmpty(huggingFaceApiKey) ? "MISSING ❌" : "OK ✓ (" + huggingFaceApiKey.Length + " chars)"));
     }
 
@@ -429,7 +431,7 @@ public class VoicePipelinePuteri : MonoBehaviour
         parallelEmotion = null;
         emotionDone = false;
 
-        StartCoroutine(RunGeminiWithFallback(transcript));
+        StartCoroutine(RunGroqWithFallback(transcript));
 
         while (!ollamaDone) yield return null;
 
@@ -457,14 +459,24 @@ public class VoicePipelinePuteri : MonoBehaviour
     //  Step 3 — Gemini with Ollama fallback
     // ─────────────────────────────────────────────────────────────────────
 
-    IEnumerator RunGeminiWithFallback(string userText)
+    IEnumerator RunGroqWithFallback(string userText)
     {
-        if (string.IsNullOrEmpty(geminiApiKey))
+        if (string.IsNullOrEmpty(groqApiKey))
         {
-            Debug.LogWarning("⚠️ Gemini API key missing. Falling back to Ollama.");
+            Debug.LogWarning("⚠️ Groq API key missing. Falling back to Ollama.");
             yield return StartCoroutine(RunOllama(userText));
             yield break;
         }
+
+        // Cooldown to avoid 429 Too Many Requests (Groq: 30 RPM = 1 per 2s)
+        float elapsed = Time.time - lastGroqRequestTime;
+        if (elapsed < GroqCooldownSeconds)
+        {
+            float wait = GroqCooldownSeconds - elapsed;
+            Debug.Log($"⏳ Groq cooldown: waiting {wait:F1}s...");
+            yield return new WaitForSeconds(wait);
+        }
+        lastGroqRequestTime = Time.time;
 
         string prompt = detectedLanguage == "ms-MY" ? promptMs :
                         detectedLanguage == "zh-CN" ? promptZh : promptEn;
@@ -480,30 +492,33 @@ public class VoicePipelinePuteri : MonoBehaviour
         string safeUser = userText.Replace("\"", "'").Replace("\n", " ").Replace("\r", "");
 
         string fullPrompt = safePrompt + " " + safeInst + " User: " + safeUser + " Puteri:";
-        string json = "{ \"contents\": [{ \"parts\": [{ \"text\": \"" + fullPrompt + "\" }] }] }";
-        string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + geminiApiKey;
+
+        // Groq uses OpenAI-compatible chat completions format
+        string json = "{\"model\":\"llama-3.3-70b-versatile\",\"messages\":[{\"role\":\"user\",\"content\":\"" + fullPrompt + "\"}],\"max_tokens\":150,\"temperature\":0.7}";
+        string url = "https://api.groq.com/openai/v1/chat/completions";
 
         UnityWebRequest request = new UnityWebRequest(url, "POST");
         request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
         request.downloadHandler = new DownloadHandlerBuffer();
         request.SetRequestHeader("Content-Type", "application/json");
-        request.timeout = 3;
+        request.SetRequestHeader("Authorization", "Bearer " + groqApiKey);
+        request.timeout = 10;
 
         yield return request.SendWebRequest();
 
         if (request.result != UnityWebRequest.Result.Success)
         {
-            Debug.LogWarning("⚠️ Gemini failed (" + request.error + "). Falling back to Ollama.");
+            Debug.LogWarning("⚠️ Groq failed (" + request.error + "). Falling back to Ollama.");
             yield return StartCoroutine(RunOllama(userText));
             yield break;
         }
 
         string raw = request.downloadHandler.text;
-        string replyText = ExtractJsonField(raw, "text");
+        string replyText = ExtractJsonField(raw, "content");
 
         if (string.IsNullOrEmpty(replyText))
         {
-            Debug.LogWarning("⚠️ Gemini returned empty. Falling back to Ollama.");
+            Debug.LogWarning("⚠️ Groq returned empty. Falling back to Ollama.");
             yield return StartCoroutine(RunOllama(userText));
             yield break;
         }
@@ -511,7 +526,7 @@ public class VoicePipelinePuteri : MonoBehaviour
         parallelOllamaReply = replyText.Replace("\\n", " ").Replace("\\\"", "\"").Replace("\\", " ").Replace("*", "").Trim();
 
         Debug.Log("======================================");
-        Debug.Log(">>> ⚡ LLM USED: GOOGLE GEMINI 2.0 FLASH (Puteri)");
+        Debug.Log(">>> ⚡ LLM USED: GROQ llama-3.3-70b-versatile (Puteri)");
         Debug.Log(">>> REPLY: " + parallelOllamaReply);
         Debug.Log("======================================");
 
