@@ -1,5 +1,6 @@
 ﻿using System.Collections;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
@@ -75,6 +76,42 @@ public class VoicePipeline : MonoBehaviour
     private bool recording = false;
     private bool isProcessing = false;
     private string detectedLanguage = "zh-CN";
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+    // Holds the raw PCM16 base64 string delivered by the JS plugin
+    private string webGLPcmBase64 = null;
+
+    [DllImport("__Internal")]
+    private static extern void MicWebGL_StartRecording(string gameObjectName);
+
+    [DllImport("__Internal")]
+    private static extern void MicWebGL_StopRecording();
+
+    // Called by the JS plugin via Unity SendMessage when the mic opens
+    public void OnWebGLMicStarted(string _)
+    {
+        Debug.Log("WebGL mic opened and recording.");
+    }
+
+    // Called by the JS plugin via Unity SendMessage when audio is ready
+    public void OnWebGLAudioReady(string base64Pcm)
+    {
+        webGLPcmBase64 = base64Pcm;
+        Debug.Log("WebGL audio received (" + base64Pcm.Length + " chars). Starting STT...");
+        StartCoroutine(SendToSTT());
+    }
+
+    // Called by the JS plugin via Unity SendMessage on mic permission denial or error
+    public void OnWebGLMicError(string error)
+    {
+        recording = false;
+        isProcessing = false;
+        Debug.LogError("WebGL Mic Error: " + error);
+        statusMessage = "❌ Mic error: " + error;
+        SetDialogue("❌ Microphone error. Please allow mic access and try again.");
+        ResetToIdle();
+    }
+#endif
 
     private string statusMessage = "⏳ Yue Fei is speaking...";
     private string lastUserText = "";
@@ -296,10 +333,15 @@ public class VoicePipeline : MonoBehaviour
 
     void StartRecording()
     {
-#if UNITY_WEBGL
-        Debug.LogWarning("Microphone not supported in WebGL");
-        statusMessage = "❌ Microphone not supported on Web";
-        return;
+#if UNITY_WEBGL && !UNITY_EDITOR
+        webGLPcmBase64 = null;
+        recording = true;
+        isProcessing = false;
+        detectedLanguage = "zh-CN";
+        statusMessage = "🎙️ Recording... (release SPACE to send)";
+        SetDialogue("🎙️ Listening...");
+        MicWebGL_StartRecording(gameObject.name);
+        Debug.Log("WebGL mic recording started.");
 #else
         if (Microphone.devices.Length == 0)
         {
@@ -318,8 +360,14 @@ public class VoicePipeline : MonoBehaviour
 
     void StopRecording()
     {
-#if UNITY_WEBGL
-        return;
+#if UNITY_WEBGL && !UNITY_EDITOR
+        recording = false;
+        isProcessing = true;
+        statusMessage = "⏳ Processing...";
+        SetDialogue("⏳ Processing your question...");
+        MicWebGL_StopRecording();
+        // SendToSTT() is triggered from OnWebGLAudioReady once the JS delivers the audio
+        Debug.Log("WebGL mic stopped, awaiting audio data from JS...");
 #else
         if (clip == null)
         {
@@ -410,8 +458,18 @@ public class VoicePipeline : MonoBehaviour
         statusMessage = "⏳ Converting speech to text...";
         SetDialogue("⏳ Converting speech to text...");
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+        string audioBase64 = webGLPcmBase64;
+        if (string.IsNullOrEmpty(audioBase64))
+        {
+            Debug.LogError("❌ WebGL: no audio data received from microphone.");
+            ResetToIdle();
+            yield break;
+        }
+#else
         byte[] audioData = AudioClipToWav(clip);
         string audioBase64 = System.Convert.ToBase64String(audioData);
+#endif
         string url = "https://speech.googleapis.com/v1/speech:recognize?key=" + googleApiKey;
 
         string json = @"{

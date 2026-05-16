@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
@@ -57,6 +58,41 @@ public class VoicePipelinePuteri : MonoBehaviour
     private string currentReplyText = "";
 
     public string statusMessage = "⏳ Puteri is speaking...";
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+    // Holds the raw PCM16 base64 string delivered by the JS plugin
+    private string webGLPcmBase64 = null;
+
+    [DllImport("__Internal")]
+    private static extern void MicWebGL_StartRecording(string gameObjectName);
+
+    [DllImport("__Internal")]
+    private static extern void MicWebGL_StopRecording();
+
+    // Called by the JS plugin via Unity SendMessage when the mic opens
+    public void OnWebGLMicStarted(string _)
+    {
+        Debug.Log("WebGL mic (Puteri) opened and recording.");
+    }
+
+    // Called by the JS plugin via Unity SendMessage when audio is ready
+    public void OnWebGLAudioReady(string base64Pcm)
+    {
+        webGLPcmBase64 = base64Pcm;
+        Debug.Log("WebGL audio (Puteri) received (" + base64Pcm.Length + " chars). Starting STT...");
+        StartCoroutine(SendToSTT());
+    }
+
+    // Called by the JS plugin via Unity SendMessage on mic permission denial or error
+    public void OnWebGLMicError(string error)
+    {
+        recording = false;
+        isProcessing = false;
+        Debug.LogError("WebGL Mic Error (Puteri): " + error);
+        statusMessage = "❌ Mic error: " + error;
+        ResetToIdle();
+    }
+#endif
 
     // ── Parallel task results ──────────────────────────────────────────────
     private string parallelOllamaReply = null;
@@ -226,10 +262,14 @@ public class VoicePipelinePuteri : MonoBehaviour
 
     void StartRecording()
     {
-#if UNITY_WEBGL
-        Debug.LogWarning("Microphone not supported in WebGL");
-        statusMessage = "❌ Microphone not supported on Web";
-        return;
+#if UNITY_WEBGL && !UNITY_EDITOR
+        webGLPcmBase64 = null;
+        recording = true;
+        isProcessing = false;
+        detectedLanguage = "ms-MY";
+        statusMessage = "🎙️ Recording... (release SPACE to send)";
+        MicWebGL_StartRecording(gameObject.name);
+        Debug.Log("WebGL mic (Puteri) recording started.");
 #else
         recording = true;
         isProcessing = false;
@@ -242,8 +282,13 @@ public class VoicePipelinePuteri : MonoBehaviour
 
     void StopRecording()
     {
-#if UNITY_WEBGL
-        return;
+#if UNITY_WEBGL && !UNITY_EDITOR
+        recording = false;
+        isProcessing = true;
+        statusMessage = "⏳ Processing...";
+        MicWebGL_StopRecording();
+        // SendToSTT() is triggered from OnWebGLAudioReady once the JS delivers the audio
+        Debug.Log("WebGL mic (Puteri) stopped, awaiting audio data from JS...");
 #else
         recording = false;
         isProcessing = true;
@@ -352,8 +397,18 @@ public class VoicePipelinePuteri : MonoBehaviour
 
         statusMessage = "⏳ Converting speech to text...";
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+        string audioB64 = webGLPcmBase64;
+        if (string.IsNullOrEmpty(audioB64))
+        {
+            Debug.LogError("❌ WebGL (Puteri): no audio data received from microphone.");
+            ResetToIdle();
+            yield break;
+        }
+#else
         byte[] pcmData = AudioClipToPcm16(clip);
         string audioB64 = System.Convert.ToBase64String(pcmData);
+#endif
         string url = "https://speech.googleapis.com/v1/speech:recognize?key=" + googleApiKey;
 
         string json = @"{
