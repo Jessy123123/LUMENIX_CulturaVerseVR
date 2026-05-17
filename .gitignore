@@ -6,6 +6,7 @@
 *.env
 Assets/StreamingAssets/.env
 Assets/StreamingAssets/.env.meta
+WebBuild/StreamingAssets/.env
 
 .vs/
 obj/
@@ -13,8 +14,9 @@ Library/
 Temp/
 Logs/
 UserSettings/
-Build/
 Builds/
+# Exclude top-level Build/ but NOT WebBuild/Build/ (tracked via Git LFS)
+/Build/
 
 # IDE / Unity auto-generated project files
 *.csproj
