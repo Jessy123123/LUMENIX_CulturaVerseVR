@@ -15,8 +15,10 @@ Temp/
 Logs/
 UserSettings/
 Builds/
-# Exclude top-level Build/ but NOT WebBuild/Build/ (tracked via Git LFS)
+# Exclude top-level Build/
 /Build/
+# Exclude the reassembled large file (kept as .part0/.part1 instead)
+WebBuild/Build/WebBuild.data.gz
 
 # IDE / Unity auto-generated project files
 *.csproj

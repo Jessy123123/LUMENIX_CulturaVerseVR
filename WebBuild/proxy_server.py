@@ -12,6 +12,21 @@ mimetypes.add_type("application/octet-stream", ".data.gz")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# ── Reassemble split large files ────────────────────────────────────────────
+def _reassemble_parts(target):
+    part0, part1 = target + ".part0", target + ".part1"
+    if os.path.exists(target) and os.path.getsize(target) > 1_000_000:
+        return  # already assembled and looks real
+    if os.path.exists(part0) and os.path.exists(part1):
+        print(f"Assembling {os.path.basename(target)} from parts...")
+        with open(target, "wb") as out:
+            for p in [part0, part1]:
+                with open(p, "rb") as f:
+                    out.write(f.read())
+        print(f"  Done: {os.path.getsize(target):,} bytes")
+
+_reassemble_parts(os.path.join(BASE_DIR, "Build", "WebBuild.data.gz"))
+
 # ── Load .env ───────────────────────────────────────────────────────────────
 def _load_env(path):
     env = {}
