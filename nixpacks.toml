@@ -1,0 +1,8 @@
+[phases.setup]
+nixPkgs = ["git-lfs"]
+
+[phases.build]
+cmds = ["git lfs install", "git lfs pull"]
+
+[start]
+cmd = "python WebBuild/proxy_server.py"
