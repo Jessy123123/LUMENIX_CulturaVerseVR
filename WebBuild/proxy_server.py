@@ -27,6 +27,22 @@ def _reassemble_parts(target):
 
 _reassemble_parts(os.path.join(BASE_DIR, "Build", "WebBuild.data.gz"))
 
+# ── Write .env for Unity to read at runtime ─────────────────────────────────
+def _write_runtime_env():
+    """Write StreamingAssets/.env from Railway env vars so Unity can load keys."""
+    env_path = os.path.join(BASE_DIR, "StreamingAssets", ".env")
+    groq   = os.environ.get("GROQ_API_KEY", "")
+    google = os.environ.get("GOOGLE_API_KEY", "")
+    hf     = os.environ.get("HUGGINGFACE_API_KEY", "")
+    if groq or google or hf:
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.write(f"GROQ_API_KEY={groq}\n")
+            f.write(f"GOOGLE_API_KEY={google}\n")
+            f.write(f"HUGGINGFACE_API_KEY={hf}\n")
+        print("  .env written to StreamingAssets")
+
+_write_runtime_env()
+
 # ── Load .env ───────────────────────────────────────────────────────────────
 def _load_env(path):
     env = {}
